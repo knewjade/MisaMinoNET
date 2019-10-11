@@ -1,6 +1,7 @@
 #pragma once
 #include "gamepool.h"
 #include "tetris_ai.h"
+#include "tetris_gem.h"
 
 namespace AI {
 
