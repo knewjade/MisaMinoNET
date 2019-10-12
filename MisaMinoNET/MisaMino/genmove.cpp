@@ -437,6 +437,10 @@ namespace AI {
     }
 
     // 移動スコア付きですべての移動先を列挙する
+    // ダイクストラ法で実装されている。
+    // ところどころ `_MACRO_HASH_POS(hash, n) |= 1;` 的なコードがコメントアウトされているのはそのため。
+    // もし、見つけた瞬間に訪問したことを記録すると、
+    // 後からみつかるコストがより少ない操作をスルーしてしまうので、pop()した後にフラグを立てている
     // 全体的に `GenMoving()` と同じ構造をしているので、コメントは気持ち少なめになっています
     void FindPathMoving(const GameField& field, std::vector<Moving> & movs, Gem cur, int x, int y, bool hold) {
         movs.clear();
@@ -448,7 +452,7 @@ namespace AI {
         char _hash_drop[64][4][GENMOV_W_MASK+1] = {0};
         char (*hash)[4][GENMOV_W_MASK+1] = &_hash[gem_add_y];
         char (*hash_drop)[4][GENMOV_W_MASK+1] = &_hash_drop[gem_add_y];
-        MovQueue<Moving> q(1024);
+        MovQueue<Moving> q(1024);  // 内部的にスコア順にソートしている
 
         {
             Moving m;
@@ -467,13 +471,14 @@ namespace AI {
         }
         while ( ! q.empty() ) {
             Moving m;
-            q.pop(m);
+            q.pop(m);  // スコアが低い順に取り出される
             if ( m.movs.back() == Moving::MOV_DROP) {
                 movs.push_back(m);
                 continue;
             }
 
             // 同じところを訪れたらスキップする
+            // pop()でスコアが小さい順に取り出されるので、スキップされるのはほかに良いスコアがあるケース
             {
                 if ( (isEnableAllSpin() || cur.num == GEMTYPE_T) ) {
                     if ( hash[m.y][m.spin][m.x & GENMOV_W_MASK] & ( 1 << m.wallkick_spin ) )
@@ -508,6 +513,10 @@ namespace AI {
                         //if ( (_MACRO_HASH_POS(hash_drop, _n) & ( 1 << v_spin)) == 0 )
                         {
                                 _MACRO_CREATE_MOVING(MOV_DROP, v_spin);
+
+                                // 唯一、q.push()するときに訪れたことを記録している
+                                // つまり、スコアより先にみつかったものが優先される。
+                                // おそらくドロップする直前までは最良の操作となるため、結果に影響ないと判断したと思われる
                                 _MACRO_HASH_POS(hash_drop, _n) |= 1 << v_spin;
                                 q.push(nm);
 
