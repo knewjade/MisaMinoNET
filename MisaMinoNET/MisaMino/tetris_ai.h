@@ -14,16 +14,16 @@ namespace AI {
     {
         enum {
             MOV_NULL,
-            MOV_L,
-            MOV_R,
-            MOV_LL,
-            MOV_RR,
-            MOV_D,
-            MOV_DD,
-            MOV_LSPIN,
-            MOV_RSPIN,
-            MOV_DROP,
-            MOV_HOLD,
+            MOV_L,  // 左移動
+            MOV_R,  // 右移動
+            MOV_LL,  // 左にいけるところまで
+            MOV_RR,  // 右にいけるところまで
+            MOV_D,  // 下移動
+            MOV_DD,  // 下にいけるところまで
+            MOV_LSPIN,  // 左回転
+            MOV_RSPIN,  // 右回転
+            MOV_DROP,  // ハードドロップ
+            MOV_HOLD,  // ソフトドロップ
             MOV_SPIN2,
             MOV_REFRESH,
         };

@@ -39,6 +39,7 @@ namespace AI {
         return gems[number][spin];
     }
     // 指定したx列で、最も低い位置にあるブロックの高さ
+    // y=2にブロックがあったら3
     // 添字0がフィールドの上端を表すため、最も数字が大きいもの=最も低い位置となる
     inline int getGemColH( int number, int spin, int x) {
         extern int GEM_COL_H[8][4][4];

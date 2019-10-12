@@ -26,7 +26,7 @@ namespace AI {
         signed char m_w, m_h;
         signed short combo;
         int b2b;
-        unsigned long m_w_mask;
+        unsigned long m_w_mask;  // 1段すべてがうまっているときを表すマスク
         unsigned long m_row[AI_POOL_MAX_H];  // フィールドデータ  // 表示部分以外の状態も持っている
         int m_hold;
         int m_pc_att;
@@ -238,11 +238,12 @@ namespace AI {
             }
             return 0;
         }
-        // @param wallkick_spin いまチェック中のスピンの結果  // TODO おそらくisWallKickSpin()の結果が入る？
-        //                      isEnableAllSpin() == false のとき、wallkick_spin=2はない
+        // @param wallkick_spin いまチェック中のスピンの結果
+        // この関数を呼び出す前に GenMoving() が呼ばれる。そこでwallkickの状態は追跡されていると思われる
+        //                      この関数内では isEnableAllSpin() == false のとき、wallkick_spin=2にならない
         //  0: Tスピンなし
-        //  1: Regular T-Spin
-        //  2: T-Spin Mini
+        //  1: その場での回転。壁蹴りなしの回転。確実にRegular T-Spin
+        //  2: 壁蹴りありの移動。T-Spin Miniの可能性あり
         signed char WallKickValue(int gem_num, int x, int y, int spin, signed char wallkick_spin) const {
             if ( ! isWallKickSpin( x, y, getGem(gem_num, spin) ) ) {
                 // T-Spinの形でない  // 4隅が埋まっていない
@@ -260,7 +261,7 @@ namespace AI {
                     }
                 }
             } else {  // 通常のSRS
-                if ( wallkick_spin == 2 ) {  // T-Spin Miniが見つかっているときは、もっと良いRegular T-Spinがあるか確認
+                if ( wallkick_spin == 2 ) {  // 壁蹴りありのT-Spinより、その場での回転のT-Spinがあるか確認
                     // spin^2: 180度回転したときのスピン: 0<->2, L<->R
                     if ( ! isCollide( x, y, getGem(gem_num, spin^2) ) ) {
                         wallkick_spin = 1; // not t-mini

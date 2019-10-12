@@ -2,7 +2,7 @@
 #include "tetris_ai.h"
 #include <assert.h>
 #define USING_MOV_D     0
-#define GENMOV_W_MASK   15
+#define GENMOV_W_MASK   15   // 0b1111
 #define SWITCH_USING_HEIGHT_OPT
 
 #define _MACRO_CREATE_MOVINGSIMPLE(arg_action_name,arg_wkspin,arg_sd) \
@@ -21,6 +21,8 @@
     nm.spin = ns; \
     nm.movs.push_back(Moving::arg_action_name); \
     nm.wallkick_spin = arg_wkspin
+
+// arg_hash_table[ny][ns][nx & GENMOV_W_MASK]みたいになる
 #define _MACRO_HASH_POS(arg_hash_table,arg_prefix) \
     arg_hash_table[arg_prefix##y][arg_prefix##s][arg_prefix##x & GENMOV_W_MASK]
 
@@ -67,15 +69,18 @@ namespace AI {
     //    MOV_SCORE_SPIN = 20,
     //};
     enum {
-        MOV_SCORE_DROP = 1,
+        MOV_SCORE_DROP = 1,  // Harddrop
         MOV_SCORE_LR = 80,
         MOV_SCORE_LR2 = 200,
         MOV_SCORE_LLRR = 100,
-        MOV_SCORE_D = 1000,
-        MOV_SCORE_DD = 3000,
+        MOV_SCORE_D = 1000,  // 下移動  // USING_MOV_D がオンであること
+        MOV_SCORE_DD = 3000,  // 下にいけるところまでソフトドロップ
         MOV_SCORE_SPIN = 150,
     };
 
+    // TODO: @param x 探索開始時のx座標?
+    // TODO: @param y 探索開始時のy座標?
+    // @param hold ホールド開始のときtrue。（prefix的に）最初の操作を表現する用で、探索には使われない
     void GenMoving(const GameField& field, std::vector<MovingSimple> & movs, Gem cur, int x, int y, bool hold) {
         movs.clear();
 		if (cur.num == 0) { // rare race condition, we're dead already if this happens
@@ -88,6 +93,11 @@ namespace AI {
         //if ( field.isCollide(x, y + 1, getGem(cur.num, cur.spin) ) ) {
         //    return ;
         //}
+        // 確認したことがある状態ならフラグをたてる
+        // wallkickの状態で桁を分けて保存する
+        //    0b001: wallkick=0で到達できる
+        //    0b010: wallkick=1で到達できる  // その場での回転
+        //    0b100  wallkick=2で到達できる  // 壁蹴りありでの回転
         char _hash[64][4][GENMOV_W_MASK+1] = {0};
         char _hash_drop[64][4][GENMOV_W_MASK+1] = {0};
         char (*hash)[4][GENMOV_W_MASK+1] = &_hash[gem_add_y];
@@ -96,8 +106,11 @@ namespace AI {
 
 #ifdef SWITCH_USING_HEIGHT_OPT
         // height of every column
+        // 各xについて、最も高い位置にあるブロックのyを取得
+        // ブロックがないときh+1
+        // 下端にブロックがあるときh
         int field_w = field.width(), field_h = field.height();
-        int min_y[32] = {0};
+        int min_y[32] = {0};  // wまで使用  // 使っていないx列は0
         {
             int beg_y = -5;
             while ( field.row[beg_y] == 0 ) ++beg_y;
@@ -111,7 +124,7 @@ namespace AI {
             }
         }
 #endif
-		if ( 1 || field.row[y+3] & field.m_w_mask ) // �ǿ����еĻ�
+        // 初期状態の作成
         {
             MovingSimple m;
             m.x = x;
@@ -128,120 +141,30 @@ namespace AI {
             q.push(m);
             hash[m.y][m.spin][m.x & GENMOV_W_MASK] = 1;
         }
-		else
-		{
-			for ( int spin = 0; spin < 4; ++spin )
-			{
-				int ns = (cur.spin + spin) % cur.mod;
-				int dx = 0;
-				for ( ; ; ++dx )
-				{
-					MovingSimple m;
-					int nx = x + dx, ny = y;
-					if ( field.isCollide(nx, ny, getGem(cur.num, ns) ) )
-						break;
-					m.x = nx;
-					m.y = ny;
-					m.spin = ns;
-					m.wallkick_spin = 0;
-					int dist_min = 0x7fffffff;
-					for ( int x = 0; x < 4; ++x ) {
-						if ( getGemColH(cur.num, ns, x) ) { // 0 = empty column
-							int dist_cur_col = min_y[nx + x] - (ny + getGemColH(cur.num, ns, x));
-							if ( dist_cur_col < dist_min ) {
-								dist_min = dist_cur_col;
-							}
-						}
-					}
-					if ( dist_min < 0 ) { // underground
-						while ( ! field.isCollide(nx, ny + 1, getGem(cur.num, ns) ) ) {
-							if ( !USING_MOV_D && (_MACRO_HASH_POS(hash,n) & 1) == 0) {
-								_MACRO_HASH_POS(hash,n) |= 1;
-							}
-							++ny; //wallkick_spin = 0;
-						}
-					} else { // under the sun
-						ny = ny + dist_min;
-						//if ( dist_min > 0 ) wallkick_spin = 0;
-						//for ( int y = m.y + 1; y < ny; ++y ) {
-						//	if ( !USING_MOV_D && (hash[y][ns][nx & GENMOV_W_MASK] & 1) == 0) {
-						//		hash[y][ns][nx & GENMOV_W_MASK] |= 1;
-						//	}
-						//}
-					}
-					m.y = ny;
-					m.lastmove = MovingSimple::MOV_NULL;
-					if ( hold ) {
-						m.hold = true;
-					} else {
-						m.hold = false;
-					}
-					q.push(m);
-					_MACRO_HASH_POS(hash,n) = 1;
-					//hash[ny][ns][nx & GENMOV_W_MASK] |= 1;
-				}
-				if ( dx > 0 )
-				for ( dx = -1; ; --dx )
-				{
-					MovingSimple m;
-					int nx = x + dx, ny = y;
-					if ( field.isCollide(nx, ny, getGem(cur.num, ns) ) )
-						break;
-					m.x = nx;
-					m.y = y;
-					m.spin = ns;
-					m.wallkick_spin = 0;
-					int dist_min = 0x7fffffff;
-					for ( int x = 0; x < 4; ++x ) {
-						if ( getGemColH(cur.num, ns, x) ) { // 0 = empty column
-							int dist_cur_col = min_y[nx + x] - (ny + getGemColH(cur.num, ns, x));
-							if ( dist_cur_col < dist_min ) {
-								dist_min = dist_cur_col;
-							}
-						}
-					}
-					if ( dist_min < 0 ) { // underground
-						while ( ! field.isCollide(nx, ny + 1, getGem(cur.num, ns) ) ) {
-							if ( !USING_MOV_D && (_MACRO_HASH_POS(hash,n) & 1) == 0) {
-								_MACRO_HASH_POS(hash,n) = 1;
-							}
-							++ny; //wallkick_spin = 0;
-						}
-					} else { // under the sun
-						ny = ny + dist_min;
-						//if ( dist_min > 0 ) wallkick_spin = 0;
-						//for ( int y = m.y + 1; y < ny; ++y ) {
-						//	if ( !USING_MOV_D && (hash[y][ns][nx & GENMOV_W_MASK] & 1) == 0) {
-						//		hash[y][ns][nx & GENMOV_W_MASK] |= 1;
-						//	}
-						//}
-					}
-					m.y = ny;
-					m.lastmove = MovingSimple::MOV_NULL;
-					if ( hold ) {
-						m.hold = true;
-					} else {
-						m.hold = false;
-					}
-					q.push(m);
-					_MACRO_HASH_POS(hash,n) = 1;
-					//hash[ny][ns][nx & GENMOV_W_MASK] |= 1;
-				}
-			}
-		}
+
+        // 最後の操作がドロップになるまで、pop->1操作進める->pushを繰り返す
+        //   - `q` から操作をpopする
+        //   - ドロップなら `movs` に記録
+        //   - そこから、一つの操作（Movingの操作用enumを参照）を行って `q` にpushする
         while ( ! q.empty() ) {
             MovingSimple m;
             q.pop(m);
             //if ( m.y < -1 ) continue;
+
+            // 最後の操作がドロップなら終了
             if ( m.lastmove == MovingSimple::MOV_DROP ) {
-                if ( getGemMaxH(cur.num, m.spin) + m.y <= 2 ) //lockout
+                // TODO
+                if ( getGemMaxH(cur.num, m.spin) + m.y <= 2 ) // lockout
                     continue;
                 movs.push_back(m);
                 continue;
             }
 
+            // 下移動
+            // 最後の操作がD,DD以外  // 同じ処理を繰り返すのを防ぐ
             if ( m.lastmove != MovingSimple::MOV_DD && m.lastmove != MovingSimple::MOV_D )
             {
+                // D,DDの処理
                 int nx = m.x, ny = m.y, ns = m.spin;
                 int wallkick_spin = m.wallkick_spin;
 #ifndef SWITCH_USING_HEIGHT_OPT
@@ -257,37 +180,48 @@ namespace AI {
 #endif
 #ifdef SWITCH_USING_HEIGHT_OPT
                 {
-                    int dist_min = 0x7fffffff;
+                    int dist_min = 0x7fffffff;  // 地形に一番近いミノブロックとの距離  // 接着していたら0のはず
                     for ( int x = 0; x < 4; ++x ) {
                         if ( getGemColH(cur.num, ns, x) ) { // 0 = empty column
+                            // ミノの各xについて一番下のブロックと、地形の一番上のブロックの距離を算出
                             int dist_cur_col = min_y[nx + x] - (ny + getGemColH(cur.num, ns, x));
+
                             if ( dist_cur_col < dist_min ) {
                                 dist_min = dist_cur_col;
                             }
                         }
                     }
+
+                    // 地形の表面より下にミノがあるとき
+                    // たとえば http://fumen.zui.jp/?v115@fgA8AeI8AeI8AeI8EeI8AeI8AeI8OexRJ とか
                     if ( dist_min < 0 ) { // underground
+                        // フィールドをぶつかるまで下に落とす
                         while ( ! field.isCollide(nx, ny + 1, getGem(cur.num, ns) ) ) {
                             if ( !USING_MOV_D && (_MACRO_HASH_POS(hash,n) & 1) == 0) {
-                                _MACRO_HASH_POS(hash,n) |= 1;
+                                _MACRO_HASH_POS(hash,n) |= 1;  // ドロップ中に通った場所を記録
                             }
-                            ++ny; wallkick_spin = 0;
+                            ++ny;
+                            wallkick_spin = 0;  // kick終わりじゃない
                         }
                     } else { // under the sun
                         ny = ny + dist_min;
                         if ( dist_min > 0 ) wallkick_spin = 0;
                         for ( int y = m.y + 1; y < ny; ++y ) {
                             if ( !USING_MOV_D && (hash[y][ns][nx & GENMOV_W_MASK] & 1) == 0) {
-                                hash[y][ns][nx & GENMOV_W_MASK] |= 1;
+                                hash[y][ns][nx & GENMOV_W_MASK] |= 1;  // ドロップ中に通った場所を記録
                             }
                         }
                     }
+
+                    // この時点でnyはフィールドと接着している状態
                 }
 #endif
                 {
                     int v_spin = (isEnableAllSpin() || cur.num == GEMTYPE_T) ? wallkick_spin : 0;
+
                     if ( (_MACRO_HASH_POS(hash_drop, n) & ( 1 << v_spin)) == 0 )
                     {
+                        // wallkickがv_spinの状態で、到達したことがない
 
                         int _nx = nx, _ny = ny, _ns = ns;
 
@@ -306,46 +240,64 @@ namespace AI {
                         {
                                 _MACRO_CREATE_MOVINGSIMPLE(MOV_DROP, v_spin, m.softdrop);
                                 _MACRO_HASH_POS(hash_drop, _n) |= 1 << v_spin;
-                                q.push(nm);
+                                q.push(nm);  // 候補追加
                         }
                     }
+
                     if ( softdropEnable() ) // DD
                     {
                         if ( ny != y ) {
+                            // ハードドロップした結果、開始時点から移動した場合
+
                             if ( ( _MACRO_HASH_POS(hash, n) & 1 ) == 0) {
+                                // wallkick==0でまだ通ってない
                                 _MACRO_CREATE_MOVINGSIMPLE(MOV_DD, 0, m.softdrop);
                                 _MACRO_HASH_POS(hash, n) |= 1;
 								nm.softdrop = true;
-                                q.push(nm);
+                                q.push(nm);  // 候補追加
                             }
                         }
                     }
                 }
             }
+
+            // 左移動
             {
                 int nx = m.x, ny = m.y, ns = m.spin;
                 --nx;
                 if ( ( _MACRO_HASH_POS(hash, n) & 1 ) == 0) {
+                    // wallkick==0でまだ通ってない
+
                     if ( ! field.isCollide(nx, ny, getGem(cur.num, ns) ) ) {
+                        // フィールドと重ならない
+
                         _MACRO_CREATE_MOVINGSIMPLE(MOV_L, 0, m.softdrop);
                         _MACRO_HASH_POS(hash, n) |= 1;
-                        q.push(nm);
+                        q.push(nm);  // 候補追加
+
                         if ( m.lastmove != MovingSimple::MOV_L && m.lastmove != MovingSimple::MOV_R
                             && m.lastmove != MovingSimple::MOV_LL && m.lastmove != MovingSimple::MOV_RR )
                         {
+                            // 最後の移動が左右の移動以外のとき
+
                             int nx = m.x - 1, ny = m.y, ns = m.spin;
                             while ( ! field.isCollide(nx - 1, ny, getGem(cur.num, ns) ) ) {
                                 --nx;
                             }
+
+                            // 左にいけるところまで移動
+
                             if ( nx != x && ( _MACRO_HASH_POS(hash, n) & 1 ) == 0) {
                                 _MACRO_CREATE_MOVINGSIMPLE(MOV_LL, 0, m.softdrop);
                                 _MACRO_HASH_POS(hash, n) |= 1;
-                                q.push(nm);
+                                q.push(nm); // 候補追加
                             }
                         }
                     }
                 }
             }
+
+            // 右移動  // 左移動と同じ
             {
                 int nx = m.x, ny = m.y, ns = m.spin;
                 ++nx;
@@ -389,18 +341,31 @@ namespace AI {
                 }
             }
 #endif
+            // 左回転
             {
                 int nx = m.x, ny = m.y, ns = (m.spin + 1) % cur.mod;
                 if ( ns != m.spin ) {
+                    // ミノの回転方向がかわったとき
+
                     if ( (isEnableAllSpin() || cur.num == GEMTYPE_T) ) {
+                        // スピン
+
                         if ( ! field.isCollide(nx, ny, getGem(cur.num, ns) ) ) {
+                            // フィールドと重ならないとき  // 壁蹴りは発生しない
+
                             if ( ( _MACRO_HASH_POS(hash, n) & ( 1 << 1 ) ) == 0 ) {
+                                // wallkick==1 (その場での回転)でまだ通っていない
+
                                 _MACRO_CREATE_MOVINGSIMPLE(MOV_LSPIN, 1, m.softdrop);
                                 _MACRO_HASH_POS(hash, n) |= 1 << 1;
                                 q.push(nm);
                             }
                         } else if ( field.wallkickTest(nx, ny, getGem(cur.num, ns), 0 ) ) {
+                            // 壁蹴りで移動できるとき
+
                             if ( ( _MACRO_HASH_POS(hash, n) & ( 1 << 2 ) ) == 0 ) {
+                                // wallkick==2 (壁蹴りあり)でまだ通っていない
+
                                 _MACRO_CREATE_MOVINGSIMPLE(MOV_LSPIN, 2, m.softdrop);
                                 _MACRO_HASH_POS(hash, n) |= 1 << 2;
                                 q.push(nm);
@@ -409,7 +374,11 @@ namespace AI {
                     } else {
                         if ( ! field.isCollide(nx, ny, getGem(cur.num, ns) ) 
                             || field.wallkickTest(nx, ny, getGem(cur.num, ns), 0 ) ) {
+                            // フィールドと重ならない || 壁蹴りで移動できる とき
+
                             if ( ( _MACRO_HASH_POS(hash, n) & 1 ) == 0 ) {
+                                // wallkick==0でまだ通ってない
+
                                 _MACRO_CREATE_MOVINGSIMPLE(MOV_LSPIN, 0, m.softdrop);
                                 _MACRO_HASH_POS(hash, n) |= 1;
                                 q.push(nm);
@@ -418,6 +387,8 @@ namespace AI {
                     }
                 }
             }
+
+            // 右回転
             {
                 int nx = m.x, ny = m.y, ns = (m.spin + 3) % cur.mod;
                 if ( ns != m.spin ) {
@@ -447,6 +418,8 @@ namespace AI {
                     }
                 }
             }
+
+            // 180度回転
             if ( spin180Enable() && m.lastmove != MovingSimple::MOV_SPIN2 ) // no 180 wallkick only
             {
                 int nx = m.x, ny = m.y, ns = (m.spin + 2) % cur.mod;
