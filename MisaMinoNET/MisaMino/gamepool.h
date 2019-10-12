@@ -27,11 +27,11 @@ namespace AI {
         signed short combo;
         int b2b;
         unsigned long m_w_mask;
-        unsigned long m_row[AI_POOL_MAX_H];
+        unsigned long m_row[AI_POOL_MAX_H];  // フィールドデータ  // 表示部分以外の状態も持っている
         int m_hold;
         int m_pc_att;
         uint64 hashval;
-        unsigned long *row;
+        unsigned long *row;  // 表示部分を先頭にした配列  // row[0] = m_row[gem_add_y] は表示されないので注意  // もしh=5ならrow[0]は6段目を表す
         GameField () {
             row = &m_row[gem_add_y];
         }
@@ -43,6 +43,9 @@ namespace AI {
             row = &m_row[gem_add_y];
             reset(w, h);
         }
+
+        // `0b00000_00001` という数値があるとき、フィールドはみため通り、右端にブロックがあるように表示される
+        // （つまり、フィールドが反転している）
         friend std::ostream& operator<<(std::ostream &os, const GameField &obj){
             os<<"\n";
             for (int i = AI::gem_add_y + 1; i < AI_POOL_MAX_H-5; ++i) {
@@ -60,6 +63,8 @@ namespace AI {
         }
         int width() const { return m_w; }
         int height() const { return m_h; }
+
+        // 初期化
         void reset (signed char w, signed char h) {
             m_w = w;
             m_h = h;
@@ -98,6 +103,7 @@ namespace AI {
             return false;
         }
 
+        // すでにあるブロックとぶつかったらtrue
         inline
         bool isCollide(int x, int y, const Gem & gem) const {
             Gem _gem = gem;
@@ -114,6 +120,10 @@ namespace AI {
             }
             return false; //isCollide(y, _gem);
         }
+
+        // 壁蹴りによって置けるようになるとき true。最後まで置けないときは false。回転後の移動なし0,0はチェックに含まれない
+        // @param gem 回転後のミノ
+        // @param spinclockwise 左回転0 or 右回転1で指定
         bool wallkickTest(int& x, int& y, const Gem & gem, int spinclockwise) const {
             static int Iwallkickdata[4][2][4][2] = {
                 { // O
@@ -195,6 +205,8 @@ namespace AI {
             }
             return false;
         }
+        // @param x gemの4x4の最も右（xが小さい）の位置で指定
+        // @param y gemの4x4の最も高い位置で指定。フィールド上端が1なので注意
         void paste(int x, int y, const Gem & gem) {
             for ( int h = 0; h < gem.geth(); ++h ) {
                 if (x >= 0)
@@ -203,15 +215,19 @@ namespace AI {
                     row[y + h] |= gem.bitmap[h] >> (-x);
             }
         }
+        // T-Spinの判定
         signed char isWallKickSpin(int x, int y, const Gem & gem) const {
-            if ( isEnableAllSpin() ) {
+            if ( isEnableAllSpin() ) {  // KOS
                 if ( isCollide( x - 1, y, gem )
                     && isCollide( x + 1, y, gem )
                     && isCollide( x, y - 1, gem )) {
                         return 1;
                 }
             } else {
-                if ( gem.num == 2 ) { //T
+                if ( gem.num == 2 ) { // T
+                    // x=[0,2], y=[0,2]の組み合わせ(Tの4隅)の位置にブロックがあるか確認
+                    // ブロックが3つ以上あればTスピン
+                    // TのGemの定義により、どの回転方向でも x=[0,2], y=[0,2] に隅がくる
                     int cnt = 0;
                     if ( x < 0 || (row[y] & (1 << x))) ++cnt;
                     if ( x < 0 || y+2 > m_h || (row[y+2] & (1 << x))) ++cnt;
@@ -222,11 +238,17 @@ namespace AI {
             }
             return 0;
         }
+        // @param wallkick_spin いまチェック中のスピンの結果  // TODO おそらくisWallKickSpin()の結果が入る？
+        //                      isEnableAllSpin() == false のとき、wallkick_spin=2はない
+        //  0: Tスピンなし
+        //  1: Regular T-Spin
+        //  2: T-Spin Mini
         signed char WallKickValue(int gem_num, int x, int y, int spin, signed char wallkick_spin) const {
             if ( ! isWallKickSpin( x, y, getGem(gem_num, spin) ) ) {
+                // T-Spinの形でない  // 4隅が埋まっていない
                 return wallkick_spin = 0;
             }
-            if ( isEnableAllSpin() ) {
+            if ( isEnableAllSpin() ) {  // KOSの回転設定
                 if ( wallkick_spin == 2) {
                     wallkick_spin = 1;
                     Gem g = getGem(gem_num, spin);
@@ -237,8 +259,9 @@ namespace AI {
                         break;
                     }
                 }
-            } else {
-                if ( wallkick_spin == 2 ) {
+            } else {  // 通常のSRS
+                if ( wallkick_spin == 2 ) {  // T-Spin Miniが見つかっているときは、もっと良いRegular T-Spinがあるか確認
+                    // spin^2: 180度回転したときのスピン: 0<->2, L<->R
                     if ( ! isCollide( x, y, getGem(gem_num, spin^2) ) ) {
                         wallkick_spin = 1; // not t-mini
                     }
@@ -274,15 +297,20 @@ namespace AI {
             hashval = hash(*this);
             return clearnum;
         }
+        // パフェの攻撃量
         int getPCAttack() const {
             return m_pc_att;
         }
+        // @param clearfull 消去ライン数
+        // @param wallkick Tスピン判定。詳細は `WallKickValue()` 参照
         int getAttack( int clearfull, signed char wallkick ) {
             int attack = 0;
             if ( clearfull > 1 ) {
                 if ( clearfull < 4 ) {
+                    // シングルライン・ダブルライン・トリプルライン
                     attack = clearfull - 1;
                 } else {
+                    // テトリス
                     attack = clearfull;
                     if ( b2b > 0 ) attack += 1;
                 }
@@ -295,6 +323,8 @@ namespace AI {
                             attack += 2;
                         }
                     } else {
+                        // 上の通常ライン消去分とあわせて調整する
+                        // (clearfull-1) + (clearfull+1) = 2 * clearfull
                         attack += clearfull + 1;
                     }
                 }
@@ -310,6 +340,10 @@ namespace AI {
                 }
             }
             return attack;
+        }
+        // @param y 表示部分の上端が0。下端がh-1
+        void setBlock(int x, int y) {
+            row[y + 1] |= 1U << (unsigned) x;
         }
         void addRow( int rowdata ) {
             for ( int h = -gem_add_y + 1; h <= m_h; ++h ) {
