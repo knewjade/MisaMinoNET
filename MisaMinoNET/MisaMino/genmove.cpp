@@ -69,13 +69,13 @@ namespace AI {
     //    MOV_SCORE_SPIN = 20,
     //};
     enum {
-        MOV_SCORE_DROP = 1,  // Harddrop
-        MOV_SCORE_LR = 80,
-        MOV_SCORE_LR2 = 200,
-        MOV_SCORE_LLRR = 100,
+        MOV_SCORE_DROP = 1,  // ハードドロップ  // のはずが未使用  // 結局すべての最後の動作はDROPなので、実質的に無意味
+        MOV_SCORE_LR = 80,  // 1回目の左右移動・1回目の回転操作
+        MOV_SCORE_LR2 = 200,  // 2連続同じ方向への左右移動  // いわゆるコンコン  // 左右移動2回目以降、1回ずつ加算される
+        MOV_SCORE_LLRR = 100,  // 左右に移動できるだけ移動する
         MOV_SCORE_D = 1000,  // 下移動  // USING_MOV_D がオンであること
         MOV_SCORE_DD = 3000,  // 下にいけるところまでソフトドロップ
-        MOV_SCORE_SPIN = 150,
+        MOV_SCORE_SPIN = 150,  // 回転操作（2回目以降。1回目の回転は MOV_SCORE_LR）
     };
 
     // TODO: @param x 探索開始時のx座標?
@@ -153,7 +153,7 @@ namespace AI {
 
             // 最後の操作がドロップなら終了
             if ( m.lastmove == MovingSimple::MOV_DROP ) {
-                // TODO
+                // フィールド内であることを確認する
                 if ( getGemMaxH(cur.num, m.spin) + m.y <= 2 ) // lockout
                     continue;
                 movs.push_back(m);
@@ -436,8 +436,11 @@ namespace AI {
         }
     }
 
+    // 移動スコア付きですべての移動先を列挙する
+    // 全体的に `GenMoving()` と同じ構造をしているので、コメントは気持ち少なめになっています
     void FindPathMoving(const GameField& field, std::vector<Moving> & movs, Gem cur, int x, int y, bool hold) {
         movs.clear();
+
         if ( field.isCollide(x, y, getGem(cur.num, cur.spin) ) ) {
             return ;
         }
@@ -446,6 +449,7 @@ namespace AI {
         char (*hash)[4][GENMOV_W_MASK+1] = &_hash[gem_add_y];
         char (*hash_drop)[4][GENMOV_W_MASK+1] = &_hash_drop[gem_add_y];
         MovQueue<Moving> q(1024);
+
         {
             Moving m;
             m.x = x;
@@ -468,6 +472,8 @@ namespace AI {
                 movs.push_back(m);
                 continue;
             }
+
+            // 同じところを訪れたらスキップする
             {
                 if ( (isEnableAllSpin() || cur.num == GEMTYPE_T) ) {
                     if ( hash[m.y][m.spin][m.x & GENMOV_W_MASK] & ( 1 << m.wallkick_spin ) )
@@ -480,6 +486,7 @@ namespace AI {
                 }
             }
 
+            // 下移動
             if ( m.movs.back() != Moving::MOV_DD && m.movs.back() != Moving::MOV_D)
             {
                 int nx = m.x, ny = m.y, ns = m.spin;
@@ -503,6 +510,9 @@ namespace AI {
                                 _MACRO_CREATE_MOVING(MOV_DROP, v_spin);
                                 _MACRO_HASH_POS(hash_drop, _n) |= 1 << v_spin;
                                 q.push(nm);
+
+                                // DROPのスコアは使われていない
+                                // 最終的にすべての動作はDROPで終わるためだと思われる
                         }
                     }
                     if ( softdropEnable() ) {
@@ -510,13 +520,15 @@ namespace AI {
                             if ( ( _MACRO_HASH_POS(hash, n) & 1 ) == 0) {
                                 _MACRO_CREATE_MOVING(MOV_DD, 0);
                                 //_MACRO_HASH_POS(hash, n) |= 1;
-                                nm.score += MOV_SCORE_DD - nm.movs.size();
+                                nm.score += MOV_SCORE_DD - nm.movs.size();  // TODO: nm.movs.size()?
                                 q.push(nm);
                             }
                         }
                     }
                 }
             }
+
+            // 左移動
             {
                 int nx = m.x, ny = m.y, ns = m.spin;
                 --nx;
@@ -546,6 +558,8 @@ namespace AI {
                     }
                 }
             }
+
+            // 右移動
             {
                 int nx = m.x, ny = m.y, ns = m.spin;
                 ++nx;
@@ -556,7 +570,7 @@ namespace AI {
                         if ( m.movs.back() != Moving::MOV_R )
                             nm.score += MOV_SCORE_LR;
                         else
-                            nm.score += MOV_SCORE_LR2;
+                            nm.score += MOV_SCORE_LR2;  // ひとつ前の操作もMOV_Rのとき
                         q.push(nm);
                         if ( m.movs.back() != Moving::MOV_L && m.movs.back() != Moving::MOV_R
                             && m.movs.back() != Moving::MOV_LL && m.movs.back() != Moving::MOV_RR )
@@ -575,6 +589,8 @@ namespace AI {
                     }
                 }
             }
+
+            // 1段下移動
             //if (USING_MOV_D)
             if ( m.movs.back() != Moving::MOV_DD )
             {
@@ -589,24 +605,31 @@ namespace AI {
                     }
                 }
             }
+
+            // 左回転
             {
                 int nx = m.x, ny = m.y, ns = (m.spin + 1) % cur.mod;
                 if ( ns != m.spin ) {
                     if ( (isEnableAllSpin() || cur.num == GEMTYPE_T) ) {
                         if ( ! field.isCollide(nx, ny, getGem(cur.num, ns) ) ) {
+                            // フィールドと重ならないとき  // 壁蹴りは発生しない
+
                             if ( ( _MACRO_HASH_POS(hash, n) & ( 1 << 1 ) ) == 0 ) {
                                 _MACRO_CREATE_MOVING(MOV_LSPIN, 1);
                                 //_MACRO_HASH_POS(hash, n) |= 1 << 1;
                                 if ( m.movs.back() != Moving::MOV_LSPIN )
-                                    nm.score += MOV_SCORE_LR;
+                                    nm.score += MOV_SCORE_LR;  // 最後の操作が左回転ではない（左回転1回目） → 左右移動と同じスコアらしい
                                 else
-                                    nm.score += MOV_SCORE_SPIN;
+                                    nm.score += MOV_SCORE_SPIN;  // 最後の操作が左回転のとき
                                 q.push(nm);
                             }
                         } else if ( field.wallkickTest(nx, ny, getGem(cur.num, ns), 0 ) ) {
+                            // 壁蹴りで移動できるとき
+
                             if ( ( _MACRO_HASH_POS(hash, n) & ( 1 << 2 ) ) == 0 ) {
                                 _MACRO_CREATE_MOVING(MOV_LSPIN, 2);
                                 //_MACRO_HASH_POS(hash, n) |= 1 << 2;
+                                // 上と同じ
                                 if ( m.movs.back() != Moving::MOV_LSPIN )
                                     nm.score += MOV_SCORE_LR;
                                 else
@@ -617,9 +640,12 @@ namespace AI {
                     } else {
                         if ( ! field.isCollide(nx, ny, getGem(cur.num, ns) )
                             || field.wallkickTest(nx, ny, getGem(cur.num, ns), 0 ) ) {
+                            // フィールドと重ならない || 壁蹴りで移動できる とき
+
                             if ( ( _MACRO_HASH_POS(hash, n) & 1 ) == 0 ) {
                                 _MACRO_CREATE_MOVING(MOV_LSPIN, 0);
                                 //_MACRO_HASH_POS(hash, n) |= 1;
+                                // 上と同じ
                                 if ( m.movs.back() != Moving::MOV_LSPIN )
                                     nm.score += MOV_SCORE_LR;
                                 else
@@ -630,6 +656,8 @@ namespace AI {
                     }
                 }
             }
+
+            // 右回転
             {
                 int nx = m.x, ny = m.y, ns = (m.spin + 3) % cur.mod;
                 if ( ns != m.spin ) {
@@ -671,6 +699,8 @@ namespace AI {
                     }
                 }
             }
+
+            // 180度回転
             if ( spin180Enable() ) //&& m.movs.back() != Moving::MOV_SPIN2 ) // no 180 wallkick only
             {
                 int nx = m.x, ny = m.y, ns = (m.spin + 2) % cur.mod;
