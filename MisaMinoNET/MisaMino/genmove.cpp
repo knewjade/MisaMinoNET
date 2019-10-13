@@ -43,6 +43,8 @@ namespace AI {
     void setComboList( std::vector<int> combolist ) {
         g_combo_attack = combolist;
     }
+    // コンボによる攻撃力を計算
+    // @param combo combo=1のとき、ライン消去1回目（0REN）
     int getComboAttack( int combo ) {
 		if (g_combo_attack.empty()) return 0;
 		return (int) ((double)((combo >= (int)g_combo_attack.size()) ? g_combo_attack.back() : g_combo_attack[combo]) * MisaBot.tetris.m_ai_param.combo / 30);

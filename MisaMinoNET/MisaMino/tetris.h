@@ -19,29 +19,31 @@ namespace AI {
     class Tetris {
     public:
         enum {
-            STATE_INIT,
-            STATE_READY,
-            STATE_MOVING,
-            STATE_PASTED,
-            STATE_OVER,
+            STATE_INIT,  // コンストラクタが実行された状態。一度離れるとこの状態にはならない
+            STATE_READY,  // reset()後やミノおいて地形を整理した後の状態
+            STATE_MOVING,  // ミノを操作中
+            STATE_PASTED,  // ミノを接着後。地形を整理する前。この状態のあと、READYかOVERに繊維
+            STATE_OVER,  // ゲーム終了判定
         };
+
         struct clear_info {
             int gem_num;
             int clears;
             int attack;
             int b2b;
             int combo;
-            int pc;
+            int pc;  // パフェがあるなら1
             signed char wallkick_spin;
-            int total_pc;
-            int total_b2b;
+            int total_pc;  // ゲーム中にパフェしたトータルの回数
+            int total_b2b;  // ゲーム中にB2Bしたトータルの回数 （B2BはTスピン・テトリスを2回以上続けると+1）
             int total_cb_att;
-            int t[4];
-            int normal[5];
+            int t[4];  // ゲーム中にTスピンしたトータルの回数。添字はTスピン時に消去したライン数。[0]はMiniを表す  // 空Tは含まない
+            int normal[5];  // ゲーム中のライン消去のトータルの回数。添字は消去したライン数。Tスピンは含まない。[0]は未使用
             void reset( int _gem_num ) {
                 memset(this, 0, sizeof(*this));
                 gem_num = _gem_num;
             }
+            // データの初期化
             void newgem( int _gem_num ) {
                 gem_num = _gem_num;
                 clears = 0;
@@ -52,11 +54,12 @@ namespace AI {
                 wallkick_spin = 0;
             }
         };
+
         Tetris() : m_pool( 10, 20 ) {
             m_state = STATE_INIT;
             reset ( 0, 10, 20 );
         }
-
+        // 状態のリセット
         void reset (unsigned seed, signed char w, signed char h) {
             m_pool.reset( w, h );
             m_pool.combo = 0;
@@ -79,6 +82,9 @@ namespace AI {
             m_clear_info.reset( 0 );
             memset( m_color_pool, 0, sizeof( m_color_pool ) );
         }
+        // 横移動。移動出来たらtrueを返す
+        // 途中に壁があっても移動できる（ワープできる）
+        // @param dx 移動量。+のとき右移動。-のとき左移動
         bool tryXMove(int dx) {
             if ( m_state != STATE_MOVING ) return false;
             if (m_pool.isCollide(m_cur_x + dx, m_cur_y, m_cur))
@@ -87,6 +93,9 @@ namespace AI {
             wallkick_spin = 0;
             return true;
         }
+        // 縦移動。移動出来たらtrueを返す
+        // 途中に壁があっても移動できる（ワープできる）
+        // @param dy 移動量。+のとき下移動。-のとき上移動
         bool tryYMove(int dy) {
             if ( m_state != STATE_MOVING ) return false;
             if (m_pool.isCollide(m_cur_x, m_cur_y + dy, m_cur))
@@ -95,6 +104,8 @@ namespace AI {
             wallkick_spin = 0;
             return true;
         }
+        // 回転操作。操作出来たらtrueを返す
+        // @param dSpin 回転量。+1のとき左回転。-1のとき右回転
         bool trySpin(int dSpin) {
             if ( m_state != STATE_MOVING ) return false;
             AI::Gem gem = AI::getGem(m_cur.num, (m_cur.spin + dSpin + 4) % 4);
@@ -113,6 +124,7 @@ namespace AI {
             wallkick_spin = 1;
             return true;
         }
+        // 180度回転
         bool trySpin180() {
             if ( m_state != STATE_MOVING ) return false;
             AI::Gem gem = AI::getGem(m_cur.num, (m_cur.spin + 2) % 4);
@@ -123,28 +135,39 @@ namespace AI {
             wallkick_spin = 1;
             return true;
         }
+        // ホールドミノの取り出しに成功したら true。そもそも取り出せなかったら false
+        // ミノを取り出した結果ゲーム終了になっても戻り値は true で、 m_state が変化する
+        // ホールドが空のときはネクストから取り出す
         bool tryHold() {
             if ( m_state != STATE_MOVING ) return false;
             if ( m_hold ) return false;
             m_hold = true;
             int hold = m_pool.m_hold;
             m_pool.m_hold = m_cur.num;
+
+            // wallkick_spinのリセットを忘れている気がする
+
             if ( hold == 0 ) {
+                // ホールドが空のとき
                 m_cur_x = AI::gem_beg_x;
                 m_cur_y = AI::gem_beg_y;
                 m_cur = AI::getGem(m_next[0].num, 0);
                 removeNext();
             } else {
+                // ホールドがあるとき
                 m_cur_x = AI::gem_beg_x;
                 m_cur_y = AI::gem_beg_y;
                 m_cur = AI::getGem(hold, 0);
             }
+
+            // 取り出した直後、ミノがすでに置けない状態ならゲーム終了
             if ( m_pool.isCollide(m_cur_x, m_cur_y, m_cur)) {
                 m_state = STATE_OVER;
                 return true;
             }
             return true;
         }
+        // ミノを地形（カラー）に反映する
         void paste() {
             for ( int y = 0; y < 4; ++y ) {
                 for ( int x = 0; x < 4; ++x ) {
@@ -154,18 +177,34 @@ namespace AI {
                 }
             }
         }
+        // ハードドロップ操作を行う。paste()も行われる
         bool drop () {
             if ( m_state != STATE_MOVING ) return false;
+
+            // データの初期化
             m_clear_info.newgem( m_cur.num );
+
+            // 接着するまで下に移動
             while ( tryYMove( 1 ) );
+
+            // wallkickを一応最後に更新？wallkickは各操作で更新しているため、あまり意味がない気がする
             wallkick_spin = m_pool.WallKickValue(m_cur.num, m_cur_x, m_cur_y, m_cur.spin, wallkick_spin);
+
+            // ミノを地形（ビット）に反映する
             m_pool.paste( m_cur_x, m_cur_y, m_cur );
+
+            // ミノを地形（カラー）に反映する
             paste();
-            m_drop_frame = m_frames;
+
+            m_drop_frame = m_frames;  // m_framesが変更された形跡なし
+
+            // 現在のミノをNULLにする
             m_cur = AI::getGem( 0, 0);
+
             m_state = STATE_PASTED;
             return true;
         }
+        // フィールド（カラー）でそろったラインを削除
         void color_pool_clearLines() {
             int dy = 63;
             for ( int y = dy; y >= 0; --y ) {
@@ -190,32 +229,48 @@ namespace AI {
         }
         void clearLines () {
             if ( m_state != STATE_PASTED ) return;
+
+            // フィールド（ビット）でそろったラインを削除
+            // m_poolのmemberが更新される
             m_clearLines = m_pool.clearLines( wallkick_spin );
+
+            // フィールド（カラー）でそろったラインを削除
             color_pool_clearLines();
+
+            // 攻撃力を計算
             m_attack = m_pool.getAttack( m_clearLines, wallkick_spin );
+
+            // 最大コンボ数を更新したら、memberを更新
+            // `m_pool.combo - 1` は通常のRENのカウントと合わせるためだと思われる（1回目のライン消去で0REN）
             m_max_combo = std::max(m_max_combo, m_pool.combo - 1);
 
-            m_clear_info.clears = m_clearLines;
-            m_clear_info.attack = m_attack;
-            m_clear_info.b2b = m_pool.b2b;
-            m_clear_info.combo = m_pool.combo;
-            m_clear_info.wallkick_spin = wallkick_spin;
-            m_clear_info.total_cb_att += getComboAttack( m_pool.combo );
+            // ライン消去のときに生ずる情報を記録する
+            m_clear_info.clears = m_clearLines;  // 消去されたライン数
+            m_clear_info.attack = m_attack;  // 攻撃力
+            m_clear_info.b2b = m_pool.b2b;  // 継続中のb2bのカウント数 (1回目のTスピン。テトリスで1)
+            m_clear_info.combo = m_pool.combo;  // 継続中のコンボ数（1回目のライン消去で1なので注意）
+            m_clear_info.wallkick_spin = wallkick_spin;  // 壁蹴りの状態
+            m_clear_info.total_cb_att += getComboAttack( m_pool.combo );  // コンボ数を攻撃力に変換
+
             if ( m_clear_info.b2b > 1 && m_attack > 0 )
             {
-                ++m_clear_info.total_b2b;
+                ++m_clear_info.total_b2b;  // B2Bの回数をカウントアップ
             }
+
             {
+                // パフェチェック
                 int i = gem_add_y + m_pool.height();
                 for ( ; i >= 0; --i ) {
                     if ( m_pool.m_row[i] ) break;
                 }
+
                 if ( i < 0 ) {
                     m_clear_info.pc = 1;
                     ++m_clear_info.total_pc;
                 }
             }
-            int special = 0;
+
+            int special = 0;  // Tスピンのとき1
             //if ( m_clear_info.gem_num == 1 && m_clearLines >= 4 )
             //{
             //    special = 1;
@@ -223,6 +278,7 @@ namespace AI {
             //}
             if ( m_attack > 0 )
             {
+                // 攻撃が発生したとき  // 空Tは含まない
                 if ( m_clear_info.wallkick_spin ) {
                     special = 1;
                     //if ( m_clear_info.gem_num == 2 )
@@ -254,6 +310,8 @@ namespace AI {
                 //    }
                 //}
             }
+
+
             if ( m_clearLines > 0 && special == 0 )
             {
                 ++m_clear_info.normal[m_clearLines];
@@ -296,6 +354,8 @@ namespace AI {
             }
             m_pool.row[y] = att;
         }
+        // ネクストの先頭のミノを削除する
+        // 削除されるミノはmemberなどに記録はされないので、この関数を前に取っておく必要がある
         void removeNext() {
             for (int i = 1; i < m_next_num; ++i) {
                 m_next[i - 1] = m_next[i];
@@ -303,20 +363,41 @@ namespace AI {
             --m_next_num;
             //m_next[15] = AI::getGem( m_rand.randint(7) + 1, 0);
         }
-        bool newpiece() { // TODO see what the fuck this shit does
+        // 新しいミノの取り出しに成功したら true。そもそも取り出せなかったら false
+        // ミノを取り出した結果ゲーム終了になっても戻り値は true で、 m_state が変化する
+        bool newpiece() {
+            // Ready状態ではなければ離脱。Ready状態には以下の状態になる必要がある
+            //     reset()を呼ぶ
+            //     clearLines()を呼ぶ
             if ( m_state != STATE_READY ) return false;
+
+            // ミノを初期位置に移動
             m_cur_x = AI::gem_beg_x;
             m_cur_y = AI::gem_beg_y;
+
+            // これまでに使用したミノの個数をカウントアップ
             ++m_curnum;
+
+            // ネクストの先頭からミノを取り出す
             m_cur = m_next[0];
+
+            // ホールドを使用可能にする
             m_hold = false;
+
+            // 壁蹴りの状態をリセット
             wallkick_spin = 0;
+
+            // ネクストからミノを取り出したので、先頭を削除する
             removeNext();
+
+            // 取り出した直後、ミノがすでに置けない状態ならゲーム終了
             //if ( m_pool.row[0] || m_pool.row[1] || m_pool.isCollide(m_cur_x, m_cur_y, m_cur)) {
             if ( m_pool.isCollide(m_cur_x, m_cur_y, m_cur) ) {
                 m_state = STATE_OVER;
                 return true;
             }
+
+            // Moving状態にする
             m_state = STATE_MOVING;
             return true;
         }
@@ -332,41 +413,48 @@ namespace AI {
         int cury() const {
             return m_cur_y;
         }
+        // 未使用
         int getCurGemCell(int x, int y) const {
             if ( m_cur.bitmap[y] & ( 1 << x ) ) return 1;
             return 0;
         }
+        // 未使用
         int getNextGemCell(int next, int x, int y) const {
             if ( m_next[next].bitmap[y] & ( 1 << x ) ) return 1;
             return 0;
         }
+        // 未使用
         int getPoolCell(int x, int y) const {
             return m_color_pool[y+32][x];
             //if ( m_pool.row[y + 1] & ( 1 << x) ) return 1;
             return 0;
         }
+        // ゲームオーバー判定になｔっていないか
         bool alive () const {
             return m_state != STATE_OVER;
         }
     public:
-        int m_state;
+        int m_state;  // 現在のステータス。「ミノを取り出す準備完了」「操作中である」「ミノを地形に反映済み」「ゲーム終了」を表す
     public:
-        AI::GameField m_pool;
-        AI::Gem m_cur;
-        int m_color_pool[64][32];
-        int m_hold;
-        int m_cur_x, m_cur_y;
-        int m_curnum;
-        signed char wallkick_spin;
-        AI::Gem m_next[128];
-        int m_next_num;
-        point m_base, m_size;
-        int m_clearLines;
-        int m_attack;
-        int m_max_combo;
-        int m_frames;
-        int m_drop_frame;
-        clear_info m_clear_info;
+        //  m_pool と m_color_pool のフィールドは、同じになるよう更新されている
+
+        AI::GameField m_pool;  // フィールドの状態。色なしのフィールドは m_color_pool。ホールド中のミノの種類や継続中のコンボ数などの情報も含む
+        AI::Gem m_cur;  // 現在操作しているミノ。ステータスがSTATE_MOVING以外では、NULLのGemの可能性もある
+        int m_color_pool[64][32];  // 色付きのフィールド。色なしのフィールドは m_pool に含まれる
+        int m_hold;  // 現在の操作中ミノですでにホールドしたときtrue。newpiece()でフラグがリセットされる
+        int m_cur_x, m_cur_y;  // 操作中のミノの位置
+        int m_curnum;  // これまでに使用したミノの個数。操作中のミノを含む
+        signed char wallkick_spin;  // 現在の壁蹴りの状態。回転すると1or2になり、移動をするとリセットされる
+        AI::Gem m_next[128];  // ネクストのミノ
+        int m_next_num;  // ネクストに保存されているミノの個数
+        point m_base, m_size;  // TODO TetrisGameで使われている
+        int m_clearLines;  // 最後の操作で消去されたライン数
+        int m_attack;  // 最後の操作で発生した攻撃力
+        int m_max_combo;  // ゲームを通して、最も大きいコンボ数 （1回目のライン消去で0RENとしてカウントする）
+
+        int m_frames;  // 実質的に未使用のため不明
+        int m_drop_frame;  // 実質的に未使用のため不明
+        clear_info m_clear_info;  // 最後のclearLines()で発生した情報群
     };
 
 }

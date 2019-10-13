@@ -23,15 +23,16 @@ namespace AI {
     const int gem_beg_y = 1;
 
     struct GameField {
-        signed char m_w, m_h;
-        signed short combo;
-        int b2b;
+        signed char m_w, m_h;  // フィールドの幅、高さ
+        signed short combo;  // 現在続いているコンボ数 // 1回目のライン消去で1。つまり通常のRENより1大きい
+        int b2b;  // 現在続いているb2b数 // 1回目のTスピン・テトリスで1
         unsigned long m_w_mask;  // 1段すべてがうまっているときを表すマスク
         unsigned long m_row[AI_POOL_MAX_H];  // フィールドデータ  // 表示部分以外の状態も持っている
-        int m_hold;
-        int m_pc_att;
-        uint64 hashval;
+        int m_hold;  // ホールドしているミノの種類
+        int m_pc_att;  // パフェしたときの火力
+        uint64 hashval;  // 現在のフィールドの状態のハッシュ値
         unsigned long *row;  // 表示部分を先頭にした配列  // row[0] = m_row[gem_add_y] は表示されないので注意  // もしh=5ならrow[0]は6段目を表す
+
         GameField () {
             row = &m_row[gem_add_y];
         }
@@ -302,6 +303,7 @@ namespace AI {
         int getPCAttack() const {
             return m_pc_att;
         }
+        // clearLines() -> getAttack() の順に呼ばれる。combo,b2bの値に注意
         // @param clearfull 消去ライン数
         // @param wallkick Tスピン判定。詳細は `WallKickValue()` 参照
         int getAttack( int clearfull, signed char wallkick ) {
