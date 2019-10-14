@@ -129,6 +129,7 @@ public:
         bool ret = Tetris::tryXMove( dx );
         return ret;
     }
+    // dxの横移動でいけるところまで移動
     bool tryXXMove(int dx) {
         bool ret = Tetris::tryXMove( dx );
         while ( Tetris::tryXMove(dx) ) ;
@@ -138,6 +139,7 @@ public:
         bool ret = Tetris::tryYMove( dy );
         return ret;
     }
+    // 下にいけるところまで移動
     bool tryYYMove(int dy) {
         bool ret = Tetris::tryYMove( dy );
         while ( Tetris::tryYMove(dy) ) ;
@@ -159,19 +161,29 @@ public:
         bool ret = Tetris::drop( );
         return ret;
     }
+    // 未使用  // コードがおかしい
     void acceptAttack(int n) {
         int att[2] = {0};
         for ( int i = 0; i < 32; i += 2) {
             att[0] |= 1 << i;
         }
+
+        // att[0] = 0b0101010101_0101010101_0101010101_01
+
         att[0] &= m_pool.m_w_mask;
+
+        // att[0] = 0b0101010101
+
         att[1] = ~att[0] & m_pool.m_w_mask;
+
+        // att[1] = 0b1010101010
 
         int rowdata = 5;
         while ( m_last_hole_x == rowdata ) {
-            rowdata = 5;
+            // m_last_hole_x == 5のとき
+            rowdata = 5;  // ここに入ったら無限ループ
         }
-        m_last_hole_x = rowdata;
+        m_last_hole_x = rowdata;  // m_last_hole_x=5にする  // つまりそのままacceptAttack()が実行されると、上で無限ループ
         rowdata = ~( 1 << rowdata ) & m_pool.m_w_mask;
         for ( ; n > 0; --n ) {
             if ( ATTACK_MODE == 0 ) addRow( 0 ); // ������

@@ -447,7 +447,7 @@ namespace AI {
         signed char wallkick_spin;  // 現在の壁蹴りの状態。回転すると1or2になり、移動をするとリセットされる
         AI::Gem m_next[128];  // ネクストのミノ
         int m_next_num;  // ネクストに保存されているミノの個数
-        point m_base, m_size;  // TODO TetrisGameで使われている
+        point m_base, m_size;  // TetrisGameで初期化されている。しかし、どこからも参照されていないため、用途は不明
         int m_clearLines;  // 最後の操作で消去されたライン数
         int m_attack;  // 最後の操作で発生した攻撃力
         int m_max_combo;  // ゲームを通して、最も大きいコンボ数 （1回目のライン消去で0RENとしてカウントする）

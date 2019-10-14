@@ -58,6 +58,8 @@ namespace AI {
             return true;
         }
     };
+    // 操作を表す
+    // スコアで順序が定義されている。score2は順序には影響を与えない
     struct MovingSimple
     {
         enum {
@@ -80,11 +82,11 @@ namespace AI {
         };
         int x, y;
         int lastmove;
-        long long score, score2;
+        long long score, score2;  // scoreはメインのスコア値。小さいほど良い。  // TODO score2は？
         signed char spin;
         signed char wallkick_spin;
         bool hold;
-		bool softdrop;
+		bool softdrop;  // ソフトドロップが必要か
 		MovingSimple() { x = INVALID_POS; wallkick_spin = 0; lastmove = MovingSimple::MOV_NULL; softdrop = false; }
         MovingSimple ( const Moving & m ) {
             x = m.x;
@@ -163,6 +165,8 @@ namespace AI {
             mov = queue[beg++];
         }
     };
+
+    // push, popするときにスコア順にソートされる
     template <class T>
     struct MovQueue
     {
@@ -185,13 +189,20 @@ namespace AI {
         T& back() {
             return queue.back();
         }
+        // 新しい要素をbackに追加して、追加した要素の参照を返却
+        // その参照経由で中身を書き換える
         T& append() {
             queue.push_back(T());
             return back();
         }
+        // 最後にappnedした要素をソートする
+        // この時点でappend()の参照は壊れるはずなので注意
         void push_back() {
             std::push_heap(queue.begin(), queue.end());
         }
+        // 最も良い要素を配列の一番後ろに置く
+        // あとで要素をとりだすときは、pop_back()して、back() で取り出して、dec_size() する
+        // 先に要素をとりだすときは front() で取り出して、pop_back()して、dec_size() する
         void pop_back() {
             std::pop_heap(queue.begin(), queue.end());
         }

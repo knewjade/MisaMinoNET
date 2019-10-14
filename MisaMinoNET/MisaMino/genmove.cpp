@@ -80,8 +80,8 @@ namespace AI {
         MOV_SCORE_SPIN = 150,  // 回転操作（2回目以降。1回目の回転は MOV_SCORE_LR）
     };
 
-    // TODO: @param x 探索開始時のx座標?
-    // TODO: @param y 探索開始時のy座標?
+    // @param x 探索開始時のx座標
+    // @param y 探索開始時のy座標
     // @param hold ホールド開始のときtrue。（prefix的に）最初の操作を表現する用で、探索には使われない
     void GenMoving(const GameField& field, std::vector<MovingSimple> & movs, Gem cur, int x, int y, bool hold) {
         movs.clear();
@@ -442,7 +442,8 @@ namespace AI {
     // ダイクストラ法で実装されている。
     // ところどころ `_MACRO_HASH_POS(hash, n) |= 1;` 的なコードがコメントアウトされているのはそのため。
     // もし、見つけた瞬間に訪問したことを記録すると、
-    // 後からみつかるコストがより少ない操作をスルーしてしまうので、pop()した後にフラグを立てている
+    // 後からみつかるコストがより少ない操作をスルーしてしまうので、pop()した後にフラグを立てている。
+    // もし、ミノが最初からフィールドと重なっているときは、movsは空になる。
     // 全体的に `GenMoving()` と同じ構造をしているので、コメントは気持ち少なめになっています
     void FindPathMoving(const GameField& field, std::vector<Moving> & movs, Gem cur, int x, int y, bool hold) {
         movs.clear();

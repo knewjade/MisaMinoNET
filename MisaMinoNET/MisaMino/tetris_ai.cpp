@@ -934,11 +934,11 @@ namespace AI {
         return score;
     }
     struct MovsState {
-        MovingSimple first;
+        MovingSimple first;  // この操作の前に行われた操作で、探索開始直後の最初のもの  // スコア値はこの中に保存されている
         GameField pool_last;
         int att, clear;
-        signed short max_combo, max_att, combo;
-        signed short player, upcomeAtt;
+        signed short max_combo, max_att, combo;  // max_combo, comboは純粋なコンボ数ではなく、コンボ数に応じたスコア値なので注意
+        signed short player, upcomeAtt;  // upcomeAtt=受け取る火力。マイナスのときは、確定した火力でabs(upcomeAtt)だけすでに受け取ったことを表す。プラスの時は相殺できるが、マイナスの時はできない。
         MovsState() { upcomeAtt = max_combo = combo = att = clear = 0; }
         bool operator < (const MovsState& m) const {
 #if 0
@@ -977,8 +977,11 @@ namespace AI {
             //    return max_att < m.max_att;
             //}
             //else
+            // 戦略が4列RENかで順序の定義が変わる
 			if ( ai_settings[player].strategy_4w )
 			{
+			    // 全体のスコア値よりもコンボのスコア値を優先する
+
 				if ( ( max_combo > 6 * 32 || m.max_combo > 6 * 32 ) ) {
 					if ( max_combo != m.max_combo ) {
 						return max_combo < m.max_combo;
@@ -987,17 +990,30 @@ namespace AI {
 				if ( (combo >= 32 * 3 || m.combo >= 32 * 3) && combo != m.combo) {
 					return combo < m.combo;
 				}
+
+				// この先は return first < m.first; のみ
 			}
 			else
 			{
-				if ( ai_settings[player].combo ) {
-					if ( ( max_combo > 6 * 32 || m.max_combo > 6 * 32 ) ) {
+                // 戦略がRENかで順序の定義が変わる
+                if ( ai_settings[player].combo ) {
+                    // 全体のスコア値よりもコンボのスコア値を優先する
+
+                    if ( ( max_combo > 6 * 32 || m.max_combo > 6 * 32 ) ) {
 						if ( max_combo != m.max_combo ) {
 							return max_combo < m.max_combo;
 						}
 					}
+
+                    // 意味のない分岐な気がする  // 詳細は中のコメント参照
 					if ( max_combo > combo && m.max_combo > m.combo && (m.max_combo > 4 * 32 || max_combo > 4 * 32) ) {
-						if ( (combo <= 2 * 32 && m.combo <= 2 * 32) ) {
+                        // 比較対象どちらかのcomboが 4 * 32 より大きいとき
+
+                        if ( (combo <= 2 * 32 && m.combo <= 2 * 32) ) {
+						    // 比較対象両方のcomboが 2 * 32以下のとき
+
+						    // TODO Unreachableでは？
+
 							long long diff = first.score - m.first.score;
 							if ( -1000 < diff && diff < 1000 ) {
 								if ( att != m.att )
@@ -1024,7 +1040,9 @@ namespace AI {
 				//        return m1 < m2;
 				//    }
 				//}
-				if ( (combo > 32 * 2 || m.combo > 32 * 2) && combo != m.combo) {
+
+                // 戦略にかかわらずcomboの評価はする
+                if ( (combo > 32 * 2 || m.combo > 32 * 2) && combo != m.combo) {
 					return combo < m.combo;
 				}
 			}
@@ -1071,24 +1089,37 @@ namespace AI {
             return true;
         };
     };
-#define BEG_ADD_Y 1
+    #define BEG_ADD_Y 1
+    // @param canhold ホールドの使用を許可するか
+    // @param hold poolの中のホールドミノと同じ値。ほとんど使われていない
     MovingSimple AISearch(AI_Param ai_param, const GameField& pool, int hold, Gem cur, int x, int y, const std::vector<Gem>& next, bool canhold, int upcomeAtt, int maxDeep, int & searchDeep) {
-		if (cur.num == 0) { // rare race condition, we're dead already if this happens
+		// GEMTYPE_NULLになったとき
+        if (cur.num == 0) { // rare race condition, we're dead already if this happens
 			assert(true); // debug break
 			cur = AI::getGem(AI::GEMTYPE_I, 0);
 		}
+
 		int player = 0;
 		int level = 10;
         typedef std::vector<MovingSimple> MovingList;
+        // 次における場所を入れるためのベクター
         MovingList movs;
+        // TODO 次に探索する操作をいれておくキュー?
         MovQueue<MovsState> que(16384);
         MovQueue<MovsState> que2(16384);
         movs.reserve(128);
+        // 探索したノード数
         int search_nodes = 0;
         const int combo_step_max = 32;
         searchDeep = 0;
         upcomeAtt = std::min(upcomeAtt, pool.height() - gem_beg_y - 1);
+
+        // 4列RENをやめる
+        // 1 < pool.combo なら true
+        // pool.comnbo == 0 で pool.row[10]にブロックがあるなら true
         if ( pool.combo > 0 && (pool.row[10] || pool.combo > 1) ) ai_param.strategy_4w = 0;
+
+        //
         if ( ai_param.hole < 0 ) ai_param.hole = 0;
         ai_param.hole += ai_param.open_hole;
 
@@ -1096,7 +1127,9 @@ namespace AI {
         //if ( level <= 0 ) maxDeep = 0;
         //else if ( level <= 6 ) maxDeep = std::min(level, 6); // TODO: max deep
         //else maxDeep = level;
-        
+
+        // ホールドが空のとき 1
+        // ホールド済みのときと比べて、探索にネクストがひとつ多く必要になるため
         int next_add = 0;
         if ( pool.m_hold == 0 ) {
             next_add = 1;
@@ -1105,8 +1138,14 @@ namespace AI {
             }
         }
 
+        // 現在のミノを置くケース
         {
             const GameField& _pool = pool;
+
+            // 次のTまで何ミノあるか
+            // 現在のミノの種類は無視
+            // ネクストの先頭にあれば0
+            // ホールドに持っていれば0
             int t_dis = 14;
             if ( _pool.m_hold != GEMTYPE_T ) {
                 for ( size_t i = 0; i < next.size(); ++i ) {
@@ -1118,39 +1157,65 @@ namespace AI {
             } else {
                 t_dis = 0;
             }
+
+            // 次における場所をmovsにいれる
             GenMoving(_pool, movs, cur, x, y, 0);
+
             for (MovingList::iterator it = movs.begin(); it != movs.end(); ++it) {
                 ++search_nodes;
+                // キューに新しい要素を追加して、書き換え用の参照を得る
                 MovsState &ms = que.append();
+                // フィールドをコピー
                 ms.pool_last = _pool;
+                // 次に置く位置でのwallkickを計算
                 signed char wallkick_spin = it->wallkick_spin;
                 wallkick_spin = ms.pool_last.WallKickValue(cur.num, (*it).x, (*it).y, (*it).spin, wallkick_spin);
+                // フィールドにミノを反映
                 ms.pool_last.paste((*it).x, (*it).y, getGem(cur.num, (*it).spin));
+                // フィールドのライン消去
                 int clear = ms.pool_last.clearLines( wallkick_spin );
+                // 攻撃力を計算
                 int att = ms.pool_last.getAttack( clear, wallkick_spin );
+                // プレイヤー設定
                 ms.player = player;
                 ms.clear = clear;
                 ms.att = att;
+                // ライン消去が発生したとき
                 if ( clear > 0 ) {
+                    // コピー元のフィールドのコピーを参照している
+                    // Moveで置いたものが反映されていないので、 combo+1 している
+                    // pool_lastを参照したほうがよさそう？
                     ms.combo = (_pool.combo + 1) * combo_step_max * ai_param.combo / 30;
+                    // 相殺分を差し引いて、受け取る攻撃力を計算
                     ms.upcomeAtt = std::max(0, upcomeAtt - att);
                 } else {
                     ms.combo = 0;
+                    // マイナスでいれている理由: 火力を受け取るとミノを出現位置がさがる（地形に近づく）ため、
+                    // それを区別できるように、せりあがるライン数にマイナスをつけて記録しておく
                     ms.upcomeAtt = -upcomeAtt;
+                    // 中身が空で何もしない
                     ms.pool_last.minusRow(upcomeAtt);
                 }
+                // 最初なのでmaxにattをそのまま保存
                 ms.max_att = att;
+                // 最初なのでmaxにcomboをそのまま保存  // TODO comboはREN+1?
                 ms.max_combo = ms.combo; //ms_last.max_combo + getComboAttack( ms.pool_last.combo );
+                // 最初の要素を記録
                 ms.first = *it;
-                ms.first.score2 = 0;
+                // スコアを計算
+                ms.first.score2 = 0;  // Evaluate()で同時に更新される
 				double h = 0;
                 ms.first.score = Evaluate(ms.first.score2, h, ai_param, pool, ms.pool_last, cur.num, 0, ms.att, ms.clear, att, clear, wallkick_spin, _pool.combo, t_dis, upcomeAtt);
-                if ( wallkick_spin == 0 && it->wallkick_spin ) ms.first.score += 1;
-
+                // TODO なりたつ条件がある？
+                if ( wallkick_spin == 0 && it->wallkick_spin ) ms.first.score += 1;  // 少し悪い評価値にする
+                // ソフトドロップを避ける
 				ms.first.score += score_avoid_softdrop(ai_param.avoid_softdrop, it->softdrop, cur.num, it->wallkick_spin, h);
+				// heapの作り直し  // MovsStateの評価に従う
                 que.push_back();
             }
         }
+
+        // ホールドが使えるなら、ホールドを置いたケースも探す
         if ( canhold && ! hold &&
             (
                 pool.m_hold == 0
@@ -1159,15 +1224,24 @@ namespace AI {
             )
             )
         if (next.size() > 0){
+            // 現在のミノをホールドに置き換え
             int cur_num;
             if ( pool.m_hold ) {
                 cur_num = pool.m_hold;
             } else {
                 cur_num = next[0].num;
             }
+
+            // ホールド前と同じミノだったらスキップ
             if ( cur_num != cur.num ) {
                 GameField _pool = pool;
+
+                // ホールドミノを更新
                 _pool.m_hold = cur.num;
+
+                // 基本的に上の繰り返し
+
+                // 次のTまで何ミノあるか
                 int t_dis = 14;
                 if ( _pool.m_hold != GEMTYPE_T ) {
                     for ( size_t i = 0; i + next_add < next.size(); ++i ) {
@@ -1179,10 +1253,16 @@ namespace AI {
                 } else {
                     t_dis = 0;
                 }
+
+                // ミノの開始位置をスポーン場所にする
                 int x = gem_beg_x, y = gem_beg_y;
                 Gem cur = getGem( cur_num, 0 );
+
+                // 次における場所をmovsにいれる
                 GenMoving(_pool, movs, cur, x, y, 1);
+
                 for (MovingList::iterator it = movs.begin(); it != movs.end(); ++it) {
+                    // 上を参照
                     ++search_nodes;
                     MovsState &ms = que.append();
                     ms.pool_last = _pool;
@@ -1215,9 +1295,15 @@ namespace AI {
                 }
             }
         }
+
+        // 動かせる場所がない
         if ( que.empty() ) {
             return MovingSimple();
         }
+
+        // mapのひとつめの[]はレベル。ふたつめの[]は探索の深さ
+        // 7 < depthのときは、7の値を使用
+        // [level][0]はベースの値らしい
         int sw_map1[16][8] = {
             {999,   4,   2,   2,   2,   2,   2,   2},
             {999,   4,   4,   2,   2,   2,   2,   2},
@@ -1272,10 +1358,14 @@ namespace AI {
         searchDeep = 1;
 		int final_depth = 65535;
 
+		// 各深さごとに探索する
+		// 幅優先探索
 		int depth = 0;
         for (; /*search_nodes < max_search_nodes &&*/ depth < maxDeep; searchDeep = ++depth ) { //d < maxDeep
+            // 探索用と結果出力用を交換
             std::swap(pq_last, pq);
-            
+
+            // 基本的にmap1, 戦略がhashのときはmap2を使用
             int (*sw_map)[8] = sw_map1;
             if ( ai_settings[player].hash ) {
                 sw_map = sw_map2;
@@ -1283,28 +1373,42 @@ namespace AI {
                 //    sw_map = sw_map3;
                 //}
             }
+
+            // search_wide, seach_select_bestを決める
+            // search_wide = 今の探索の深さで探索する状態の数
+            // seach_select_best = ある盤面でミノをおとすとき、上位何個の状態を次の探索に進めるか。現在のミノ、ホールドミノそれぞれでseach_select_best個ずつ選択される
             int search_base_width = sw_map[level][0];// - sw_map[level][0] / 6;
             int search_wide = 1000;
             if ( depth > 7 ) search_wide = sw_map[level][7];
             else search_wide = sw_map[level][depth];
             
             //int seach_select_best = (level <= 3 ? 1000 : (std::min(search_wide, 30) ) );
+            // だいたい search_wideの3/4 と search_base_width のより小さい値を選択  // baseが小さいほうが多そう
             int seach_select_best = std::min(search_wide - search_wide / 4, search_base_width);
             if ( level <= 3 ) {
                 seach_select_best = search_wide - search_wide / 4;
             }
+
+            // baseではないほうが選択されたとき
             if ( seach_select_best < search_base_width ) {
                 seach_select_best = std::min(search_base_width, std::max(15, search_wide) );
             }
+
+            // 結果出力用キューのクリア
             pq->clear();
-            int max_combo = 3;
-            long long max_search_score = pq_last->back().first.score;
+
+            int max_combo = 3;  // 実質的に未使用
+            // 前の結果で最も悪いスコアを取りだす  // 未使用
+            long long max_search_score = pq_last->back().first.score;  // 配列の一番後ろの値を取り出す  // だいたい悪い
             {
+                // 厳密に最も悪いものを取り出す  // 配列の真ん中からくらいから探す  // heap（2分木）の特性上、半分より後ろに葉（悪い値）が入っている
                 for ( int s = pq_last->size(), i = s / 2; i < s; ++i ) {
                     max_search_score = std::max((long long)max_search_score, pq_last->queue[i].first.score );
                 }
                 max_search_score = (max_search_score * 2 + pq_last->front().first.score) / 3;
             }
+
+            // 最大search_wide個まで探索する
             std::set<GameState> gsSet;
             for ( int pqmax_size = (int)pq_last->size(),
                 pq_size = (int)pq_last->size(),
@@ -1313,13 +1417,16 @@ namespace AI {
 
                 --pq_size, pq_last->dec_size())
             {
+                // forの条件によって、pq_size <= 0にはならないはず
+                if ( pq_size > 1 ) pq_last->pop_back();  // 最も一番良い要素を取り出す  // 実際には back() で要素が取り出される
 
-                if ( pq_size > 1 ) pq_last->pop_back();
-
+                // 後ろの要素を取り出す
                 const MovsState &ms_last = pq_last->back();
-                if ( pq_size != pqmax_size && ms_last.first.score > 50000000 ) { // ���߷ּ�֦
+                if ( pq_size != pqmax_size && ms_last.first.score > 50000000 ) { // スコアが高すぎるときはスキップ
                     break;
                 }
+
+                // 中止するときはとりあえず要素をそのままコピーしているっぽい
                 if (Abort()) {
 					if (final_depth > depth) final_depth = depth;
 
@@ -1327,6 +1434,8 @@ namespace AI {
                     pq->push(ms_last);
                     continue;
                 }
+
+                // 実質的に未使
                 max_combo = std::max( max_combo, (int)ms_last.pool_last.combo );
                 if (0)
                 if ( pq_size != pqmax_size ) { // ����combo�����combo��֦
@@ -1345,25 +1454,40 @@ namespace AI {
                         break;
                     }
                 }
+
+                // 戦略がhashのとき
                 if ( ai_settings[player].hash )
                 {
+                    // 同じ盤面が過去に発生していないか確認する
+                    // gsSetのスコープ的に、同じ探索深さ内の盤面をチェックしている
                     GameState gs(ms_last.pool_last.hashval, ms_last.pool_last.m_hold, ms_last.att, ms_last.clear, ms_last.combo, ms_last.pool_last.b2b);
                     if ( gsSet.find(gs) == gsSet.end() ) {
                         gsSet.insert(gs);
                     } else {
+                        // スキップ
                         continue;
                     }
                 }
+
+                // 未使用
                 int hold = 0;
                 //if ( !ms_last.first.movs.empty() && ms_last.first.movs[0] == Moving::MOV_HOLD ) hold = 1;
                 if ( !ms_last.first.hold ) hold = 1;
+
+                // 次のTまで何ミノあるか
+                // 現在のミノの種類は無視
+                // ネクストの先頭にあれば0
+                // ホールドに持っていれば0
                 int t_dis = 14;
                 int d_pos = depth;
+                // 探索開始時にホールドが空で、いまホールドが空ではないとき、チェックするミノの深さをひとつずらす
                 if ( next_add && ms_last.pool_last.m_hold ) d_pos = depth + 1;
+                // みたい深さのネクストにミノがない
                 if ( d_pos >= next.size() ) {
                     pq->push(ms_last);
                     continue;
                 }
+
                 int cur_num = next[d_pos].num;
                 if ( ms_last.pool_last.m_hold != GEMTYPE_T ) {
                     for ( size_t i = 0; d_pos + 1 + i < next.size(); ++i ) {
@@ -1375,54 +1499,77 @@ namespace AI {
                 } else {
                     t_dis = 0;
                 }
+
+                // 次における場所をmovsにいれる
+                // ms_last.upcomeAtt < 0は、相手からの火力が確定しているケース（相殺できない）。受け取った火力だけマイナスで入っている
                 if ( BEG_ADD_Y && ms_last.upcomeAtt < 0 )
+                    // 火力を受け取っているため、探索開始位置をさげる
                     GenMoving(ms_last.pool_last, movs, getGem( cur_num, 0 ), AI::gem_beg_x, AI::gem_beg_y - ms_last.upcomeAtt, 0 );
                 else
                     GenMoving(ms_last.pool_last, movs, getGem( cur_num, 0 ), AI::gem_beg_x, AI::gem_beg_y, 0 );
+
                 if ( movs.empty() ) {
+                    // 動けるところがない
                     MovsState ms = ms_last;
-                    ms.first.score += 100000000;
+                    ms.first.score += 100000000;  // 最悪の評価値
                     pq->push(ms);
-                    continue; // ���־͹ҵĻ�ʹ��hold�����������
+
+                    // 現在のミノを置くことができないなら、ホールドでの探索は実行しない
+                    continue;
                 } else {
+                    // 初手とほぼ同じ処理
+                    // 現在の盤面での結果を一度 p に保存する。そのあと、スコア上位seach_select_best個だけ選択してpqに戻す
                     MovQueue<MovsState> p(movs.size());
                     for (size_t i = 0; i < movs.size() ; ++i) {
                         ++search_nodes;
                         MovsState &ms = p.append();
                         {
                             ms.first = ms_last.first;
+                            // フィールドをコピー
                             ms.pool_last = ms_last.pool_last;
+                            // 次に置く位置でのwallkickを計算
                             signed char wallkick_spin = movs[i].wallkick_spin;
                             wallkick_spin = ms.pool_last.WallKickValue(cur_num, movs[i].x, movs[i].y, movs[i].spin, wallkick_spin);
+                            // フィールドにミノを反映
                             ms.pool_last.paste(movs[i].x, movs[i].y, getGem(cur_num, movs[i].spin));
+                            // フィールドのライン消去
                             int clear = ms.pool_last.clearLines( wallkick_spin );
+                            // 攻撃力を計算
                             int att = ms.pool_last.getAttack( clear, wallkick_spin );
+                            // プレイヤー設定
                             ms.player = player;
                             ms.clear = clear + ms_last.clear;
                             ms.att = att + ms_last.att;
                             ms.upcomeAtt = ms_last.upcomeAtt;
                             if ( clear > 0 ) {
+                                // 相殺を当て続ける限りせり上がりは発生しないと考えているように見える
+
                                 ms.combo = ms_last.combo + (combo_step_max + 1 - clear) * ai_param.combo / 30;
+                                // 火力がまだ確定していない
                                 if ( ms_last.upcomeAtt > 0 )
-                                    ms.upcomeAtt = std::max(0, ms_last.upcomeAtt - att);
+                                    ms.upcomeAtt = std::max(0, ms_last.upcomeAtt - att);  // 相殺する
                             } else {
                                 ms.combo = 0;
                                 if ( ms_last.upcomeAtt > 0 ) {
-                                    ms.upcomeAtt = -ms_last.upcomeAtt;
+                                    ms.upcomeAtt = -ms_last.upcomeAtt;  // 火力を受け取った
                                     ms.pool_last.minusRow(ms_last.upcomeAtt);
                                 }
                             }
+                            // 最大値の更新
                             ms.max_att = std::max((int)ms_last.max_att, ms_last.att + att);
                             ms.max_combo = std::max(ms_last.max_combo, ms.combo); //ms_last.max_combo + getComboAttack( ms.pool_last.combo );
-                            ms.first.score2 = ms_last.first.score2;
-							double h;
+                            // スコアを計算
+                            ms.first.score2 = ms_last.first.score2;  // Evaluate()で同時に更新される
+                            double h;
                             ms.first.score = Evaluate(ms.first.score2, h, ai_param,
                                 pool,
                                 ms.pool_last, cur_num, depth + 1, ms.att, ms.clear, att, clear, wallkick_spin, ms_last.pool_last.combo, t_dis, ms_last.upcomeAtt);
-                            if ( wallkick_spin == 0 && movs[i].wallkick_spin ) ms.first.score += 1;
 
+                            if ( wallkick_spin == 0 && movs[i].wallkick_spin ) ms.first.score += 1;
+                            // ソフトドロップを避ける
 							ms.first.score += score_avoid_softdrop(ai_param.avoid_softdrop, movs[i].softdrop, cur.num, movs[i].wallkick_spin, h);
                         }
+                        //
                         p.push_back();
                     }
                     for ( int i = 0; i < seach_select_best && ! p.empty(); ++i) {
@@ -1431,19 +1578,31 @@ namespace AI {
                         p.dec_size();
                     }
                 }
+
+                // ホールドが使えるとき
                 if ( canhold && depth + next_add < next.size())
                 {
-                    MovsState ms_last = pq_last->back();
+                    MovsState ms_last = pq_last->back();  // 再取得？取得しなくても変わらないはず
                     //int cur_num = ms_last.pool_last.m_hold;
+
                     int cur_num;
                     int d_pos = depth + next_add;
                     if ( ms_last.pool_last.m_hold != next[d_pos].num ) {
+                        // 現在のミノとホールドミノが違うとき
+
+                        // ホールドミノを更新
                         if ( ms_last.pool_last.m_hold ) {
+                            // ホールドミノを現在のミノとして扱う
                             cur_num = ms_last.pool_last.m_hold;
                         } else {
+                            // ネクストのミノを現在のミノとして扱う
                             cur_num = next[d_pos].num;
                         }
+                        // TODO: たぶんバグ。上で現在のミノとして扱っていたミノをホールドしなければならないはず。再定義される前のcur_numが取れれば、それを使用したほうが良い
+                        // 問題が表面化しないのは、発生するのは2手目以降であり、初手を置くたびに置く場所を探索している限り、不正な手順は発生しない
                         ms_last.pool_last.m_hold = next[d_pos].num;
+
+                       // 次のTまで何ミノあるか
                         if ( ms_last.pool_last.m_hold != GEMTYPE_T ) {
                             t_dis -= next_add;
                             if ( t_dis < 0 ) {
@@ -1457,15 +1616,22 @@ namespace AI {
                         } else {
                             t_dis = 0;
                         }
+
+                        // 次における場所をmovsにいれる
+                        // ms_last.upcomeAtt < 0は、相手からの火力が確定しているケース（相殺できない）。受け取った火力だけマイナスで入っている
                         if ( BEG_ADD_Y && ms_last.upcomeAtt < 0 )
                             GenMoving(ms_last.pool_last, movs, getGem( cur_num, 0 ), AI::gem_beg_x, AI::gem_beg_y - ms_last.upcomeAtt, 1 );
                         else
                             GenMoving(ms_last.pool_last, movs, getGem( cur_num, 0 ), AI::gem_beg_x, AI::gem_beg_y, 1 );
+
                         if ( movs.empty() ) {
+                            // 動けるところがない
                             MovsState ms = ms_last;
                             ms.first.score += 100000000;
                             pq->push(ms);
                         } else {
+                            // 初手とほぼ同じ処理
+                            // 現在の盤面での結果を一度 p に保存する。そのあと、スコア上位seach_select_best個だけ選択してpqに戻す
                             MovQueue<MovsState> p(movs.size());
                             for (size_t i = 0; i < movs.size() ; ++i) {
                                 ++search_nodes;
@@ -1506,6 +1672,7 @@ namespace AI {
                                 }
                                 p.push_back();
                             }
+
                             for ( int i = 0; i < seach_select_best && ! p.empty(); ++i) {
                                 pq->push(p.front());
                                 p.pop_back();
@@ -1515,11 +1682,21 @@ namespace AI {
                     }
                 }
             }
+
+            // どこにも動けないとき
+            // ネクストを辿って探索した結果、動けないと判断した場合でも、手なしと判断されることを意味している
+            // おけるところにおいてとりあえず延命はしようとしない
             if ( pq->empty() ) {
                 return MovingSimple();
             }
         }
+
+        // この時点で、maxDeepまで探索ができている
+
 		if (final_depth > depth) final_depth = depth;
+
+		// 現時点で不明なネクストをホールドして、判明しているホールドを使ったケースの探索
+		// 処理はこれまでとほぼ同じ
 
         //if (0)
         if ( ai_settings[player].hash && canhold && !Abort() ) { // extra search
@@ -1556,7 +1733,7 @@ namespace AI {
                 if ( pq_size > 1 ) pq_last->pop_back();
 
                 const MovsState &ms_last = pq_last->back();
-                if ( pq_size != pqmax_size && ms_last.first.score > 50000000 ) { // ���߷ּ�֦
+                if ( pq_size != pqmax_size && ms_last.first.score > 50000000 ) {
                     break;
                 }
                 pq->push(ms_last);
@@ -1573,9 +1750,13 @@ namespace AI {
                     }
                 }
                 //if ( !ms_last.first.movs.empty() && ms_last.first.movs[0] == Moving::MOV_HOLD ) hold = 1;
+                // TODO いまの探索中の盤面の1手目でホールドをしていないときはスキップ
+                // 必ずホールドがある状態だけにしたい？それにしては条件が厳しすぎる（最終的にホールドされていれば、firstでホールドする必要はない）
                 if ( !ms_last.first.hold ) {
                     continue;
                 }
+
+                // 次のTまで何ミノあるか
                 int t_dis = 14;
                 int d_pos = depth + next_add;
                 int cur_num = ms_last.pool_last.m_hold;
@@ -1585,10 +1766,12 @@ namespace AI {
                         break;
                     }
                 }
+
                 if ( BEG_ADD_Y && ms_last.upcomeAtt < 0 )
                     GenMoving(ms_last.pool_last, movs, getGem( cur_num, 0 ), AI::gem_beg_x, AI::gem_beg_y - ms_last.upcomeAtt, 0 );
                 else
                     GenMoving(ms_last.pool_last, movs, getGem( cur_num, 0 ), AI::gem_beg_x, AI::gem_beg_y, 0 );
+
                 if ( movs.empty() ) {
                     MovsState ms = ms_last;
                     ms.first.score += 100000000;
@@ -1633,6 +1816,7 @@ namespace AI {
                         }
                         p.push_back();
                     }
+
                     for ( int i = 0; i < seach_select_best && ! p.empty(); ++i) {
                         pq->push(p.front());
                         p.pop_back();
@@ -1640,6 +1824,9 @@ namespace AI {
                     }
                 }
             }
+
+            // ここは見えないネクストを使える可能性があるため、手なし判断してはいけないのでは？
+            // （ここで探索しているのは、現時点で不明なネクストをホールドして、判明しているホールドを使ったケースなので）
             if ( pq->empty() ) {
                 return MovingSimple();
             }
@@ -1661,7 +1848,14 @@ namespace AI {
             return m.first;
         }
     }
+    // @param param 係数
+    // @param sd ソフトドロップが必要な操作か
+    // @param cur 現在のミノの種類
+    // @param wk wallkickであるか（1より大きい値で呼び出しても、暗黙的にbool0,1に変換される）
+    // @param h TODO
 	int score_avoid_softdrop(int param, bool sd, int cur, bool wk, double h) {
+        // ソフトドロップが必要で「Tスピンの壁蹴り」でないときは、param * 5のスコアを与える
+        // そのあと、 / (1 + pow(5, h - 6.5)) で標準化
 		return TSD_only? 0 : (int) ((double)((sd && !(cur == AI::GEMTYPE_T && wk))? param * 5 : 0) / (1 + pow(5, h - 6.5)));
 	}
     struct AI_THREAD_PARAM {
@@ -1707,24 +1901,34 @@ namespace AI {
         int searchDeep = 0;
         *p->flag = 1;
 
+        // 最も良い置く場所が選択される
         AI::MovingSimple best = AISearch(p->ai_param, p->pool, p->hold, p->cur, p->x, p->y, p->next, p->canhold, p->upcomeAtt, p->maxDeep, searchDeep);
+
+        // 置く場所から、操作を決める
         AI::Moving mov;
         const AI::GameField &gamefield = p->pool;
         std::vector<AI::Gem> &gemNext = p->next;
-        mov.movs.push_back(Moving::MOV_DROP);
+        mov.movs.push_back(Moving::MOV_DROP);  // 操作にMOV_DROPをいれておく  // あとでちゃんとした操作がみつかったら上書きされる
         if ( best.x != AI::MovingSimple::INVALID_POS ) { // find path
             int hold_num = gamefield.m_hold;
             if ( gamefield.m_hold == 0 && ! gemNext.empty()) {
+                // ホールドが空で、ネクストがあるとき、
+                // ホールドを使っても大丈夫なように先にネクストから取り出しておく
                 hold_num = gemNext[0].num;
             }
+
+            // 操作を探索
             std::vector<AI::Moving> movs;
             if ( best.hold ) {
-                cur = AI::getGem(hold_num, 0);
+                // ホールドミノをつかうとき
+                cur = AI::getGem(hold_num, 0);  // 現在のミノを入れ替える
                 FindPathMoving(gamefield, movs, cur, AI::gem_beg_x, AI::gem_beg_y, true);
             } else {
                 cur = p->cur;
                 FindPathMoving(gamefield, movs, cur, p->x, p->y, false);
             }
+
+            // movsの中から、置きたい場所と同じ場所のMovingを取り出す
             for ( size_t i = 0; i < movs.size(); ++i ) {
                 if ( movs[i].x == best.x && movs[i].y == best.y && movs[i].spin == best.spin ) {
                     if ( (isEnableAllSpin() || cur.num == GEMTYPE_T) ) {
@@ -1737,6 +1941,8 @@ namespace AI {
                         break;
                     }
                 } else if ( cur.num == GEMTYPE_I || cur.num == GEMTYPE_Z || cur.num == GEMTYPE_S ) {
+                    // ISZミノは回転方向が反対でもOKなので、その場合も確認する
+
                     if ( (best.spin + 2 ) % 4 == movs[i].spin ) {
                         if ( best.spin == 0 ) {
                             if ( movs[i].x == best.x && movs[i].y == best.y - 1 ) {
@@ -1763,6 +1969,9 @@ namespace AI {
                 }
             }
         }
+
+        // 操作がみつからないときは、強制的にDROPする
+        // FindPathMovin()の結果が不正なときになる可能性がありそう
         if ( mov.movs.empty() ) {
             mov.movs.clear();
             mov.movs.push_back( AI::Moving::MOV_NULL );
@@ -1777,6 +1986,10 @@ namespace AI {
         
         return cur;
     }
+
+    // AIの実行
+    // もともと別のThreadで実行されていたが、いまはただの関数呼び出し
+    // @param hold poolの中のホールドミノと同じ値。ほとんど使われていなさそう
     AI::Gem RunAI(Moving& ret_mov, int& flag, const AI_Param& ai_param, const GameField& pool, int hold, Gem cur, int x, int y, const std::vector<Gem>& next, bool canhold, int upcomeAtt, int maxDeep, int & searchDeep) {
         flag = 0;
         //_beginthread(AI_Thread, 0, new AI_THREAD_PARAM(NULL, ret_mov, flag, ai_param, pool, hold, cur, x, y, next, canhold, upcomeAtt, maxDeep, searchDeep, level, player) );
