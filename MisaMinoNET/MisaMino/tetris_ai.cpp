@@ -40,15 +40,28 @@ namespace AI {
         int score = 0;
         // ��߶�
         //int last_min_y[32] = {0};
+        // 最も高い位置にあるブロックのy座標 // MisaMino的にyが小さいほどフィールドの上なので、minYとなる
+        // フィールドにブロックがない列でも、フィールド下がブロックで初期化される （真にブロックがないときは0）  // 添え字は[x]
         int min_y[32] = {0};
+        // その行にある空白の数  // 空行のときpool_wとなる // 添え字は[y]
         int emptys[32] = {0};
-        int maxy_index = 31, maxy_cnt = 0;
+        // 最も高い位置にあるブロックについて、一番低い列のx座標  // MisaMino的にyが大きいほどフィールドの下なので、maxYとなる
+        // 一番低い列が複数あっても、途中でmaxy_flat_cntが最も大きくなるようなx座標に更新される  // つまり、一番低い面の一番左端（x=0寄りの端）
+        int maxy_index = 31;
+        // maxy_indexと同じ高さの列が何列あるか  // ある列が単独で低い場合は0。2列同じときは1
+        int maxy_cnt = 0;
+        // 一番低い列が平らに何列続いているか
+        // maxy_cntが0のときは更新されない  // そのうえで、ある列が単独で低い場合は1、2列続いているときは1
         int maxy_flat_cnt = 0; // �ƽ̨
+        // すべての列の中で、最も高い位置にあるブロックのy座標
         int miny_val = 31;
+        // 穴の数
+        // Open Holeは含まない
         int total_hole = 0;
         int beg_y = -5;
         const int pool_w = pool.width(), pool_h = pool.height();
         //last_min_y[31] = -1;
+        // maxy_indexに31が入っているので、あとでmin_y[maxy_index]するため小さい値を仮にいれておく
         min_y[31] = -1;
         {
             //while ( last_pool.row[beg_y] == 0 ) ++beg_y;
@@ -63,11 +76,20 @@ namespace AI {
             beg_y = -5;
             while ( pool.row[beg_y] == 0 ) ++beg_y;
             for ( int x = 0; x < pool_w; ++x) {
+                // フィールド上から確認していく
                 for ( int y = beg_y, ey = pool_h + 1; y <= ey; ++y) { // Ҫ�е��б�����pool.h����������
                     if ( pool.row[y] & ( 1 << x ) ) {
+                        // ブロックがあるとき
+
+                        // 最も高いブロックの位置を記録
                         min_y[x] = y;
+
+                        // すべての列で最も高い位置なら、その値を記録
                         miny_val = std::min(miny_val, y);
+
+                        // maxy_indexには、そのとき最も高さ低い列のx座標が入っている
                         if ( y > min_y[maxy_index]) {
+                            // 最も高いブロックの位置が、他の列より低い
                             maxy_index = x;
                             maxy_cnt = 0;
                         } else if ( y == min_y[maxy_index]) {
@@ -77,56 +99,108 @@ namespace AI {
                     }
                 }
             }
+
+            // ■ v_transitions
+            // 行ごとにみて、空白<->ブロックの変化が多いほど悪いスコアを与える
+            // ブロックがないラインはスキップ（transitions=0 扱い）
+            // ブロックがあるとき、最低でもtransitionsは2より大きくなるはず
+            // （ゲームの仕様上、ラインがそろうと消えてしまうため、少なくともブロック→空白→ブロックの構造になる）
+            // したがってtransitionsは最低でも `ブロックのあるライン数 * 2` は積みあがる
+            // そのため、フィールドが低いだけでそもそも有利
+            // スコアは、(transitions / 10)ごとに、param::v_transitionsだけ悪くなる
             int transitions = 0;
+            // フィールド上から確認していく
             for ( int y = beg_y; y <= pool_h; ++y) {
+                // となりのブロックが 空白=0 か ブロック=1 か
+                // フィールド外の壁を想定して、最初は1
                 int last = 1; //pool.row[y] & 1;
                 if ( pool.row[y] > 0 ) {
+                    // y行にブロックがあるとき
                     for ( int x = 0; x < pool_w; ++x) {
                         if ( pool.row[y] & ( 1 << x ) ) {
+                            // ブロック→空白になったときカウントアップ
                             if ( last == 0 ) ++transitions;
                             last = 1;
                         } else {
+                            // 空白→ブロックになったときカウントアップ
                             if ( last == 1 ) ++transitions;
                             last = 0;
+                            // 空白の数を記録
                             ++emptys[y];
                         }
                     }
                 } else {
+                    // すべてのブロックが空白
                     emptys[y] = pool_w;
                 }
+                // 最後のマスと壁のtransitionを考慮
                 transitions += !last;
             }
             score += ai_param.v_transitions * transitions / 10;
         }
+
+        // 実際には壁であるが、あとで隣と高さを比較する処理で都合が良くなるよう調整していると思われる
+        // （pool_w - 1 のとき、左右の値が同じになる）
         min_y[pool_w] = min_y[pool_w-2];
         //last_min_y[pool_w] = last_min_y[pool_w-2];
 
+        // ■ hold_I
+        // ホールドにIミノがあれば、良いスコアを与える
         if ( pool.m_hold == GEMTYPE_I ) {
             score -= ai_param.hold_I;
         }
+        // ■ hold_T
+        // ホールドにTミノがあれば、良いスコアを与える
         if ( pool.m_hold == GEMTYPE_T ) {
             score -= ai_param.hold_T;
         }
+
+        // maxy_cnt: 最も低い列と同じ高さを持つ列が、全部で何列あるか
         if ( maxy_cnt > 0 ) {
+            // 一番低い列が、複数の列存在するとき
+
+            // ybeg = 最も低い列の高さ
             int ybeg = min_y[maxy_index];
+            // 最も低い列の高さの1段上を取得する
+            // 空白を1としたビット列にする
             unsigned rowdata = pool.row[ybeg-1];
             int empty = ~rowdata & pool.m_w_mask;
             for ( int b = maxy_index; b < pool_w; ++b ) {
+                // bは探索中のx座標
+
+                // ybegと同じ高さの列を探す
                 if ( ybeg != min_y[b] ) continue;
+
+                // ybegと同じ高さの列が何列続いているか
                 int cnt = 1;
                 for ( int b1 = b + 1; empty & ( 1 << b1); ++b1) ++cnt;
+
+                // 前より長く平らな面を見つけた
                 if ( maxy_flat_cnt < cnt ) {
+                    // maxy_flat_cntとmaxy_indexを更新する
                     maxy_flat_cnt = cnt;
                     maxy_index = b;
                 }
             }
         }
-        // ��������
+
+        // 穴とは
+        // その列で一番上にあるブロックより下にある空白のこと
+        // 周辺の状態によって、Open holeなどになる。詳細は都度コメント
+
+        // 穴の数
+        // y行にある穴の数 // 添字は[y]
+        // Open Holeは含まない
         int x_holes[32] = {0}; // ˮƽ���򶴵�����
+        // x列にある穴の数 // 添字は[x]
+        // Open Holeを含む
         int y_holes[32] = {0}; // ��ֱ���򶴵�����
+        // y行にあるOpen Holeの数 // 添字は[y]
         int x_op_holes[32] = {0}; // ˮƽ���򶴵�����
         //int last_pool_hole_score;
         int pool_hole_score;
+        // すべての穴の数
+        // Open Holeを含む
         int pool_total_cell = 0;
         //{   // last_pool
         //    int x_holes[32] = {0}; // ˮƽ���򶴵�����
@@ -212,71 +286,157 @@ namespace AI {
         //    last_pool_hole_score = hole_score;
         //}
         {   // pool
+            // そのx列で、最も高い位置にある穴のy座標を記録  // 添字は[x]
+            // Open Hole は含まない
             int first_hole_y[32] = {0}; // ��ֱ��������Ķ���y
+            // x列ごとに連続するHoleの数をカウントアップ  // 添字は[y]
+            // 連続している穴をみつけたとき、2つめから+1を始める  // すべてが単体の穴なら0
+            // Open Hole は含まない
             int x_renholes[32] = {0}; // ��ֱ������������
+            // Holeによるスコア  // 最終的にscoreへ += される
             double hole_score = 0;
+
             const GameField& _pool = pool;
             for ( int x = 0; x < pool_w; ++x) {
                 for ( int y = min_y[x]; y <= pool_h; ++y ) {
+                    // yはその列で最も上のブロックから探しているため、ここで見つかる空白はすべて穴である
+                    // 穴は、一つ上にブロックがあるもので、横の状態に依存しない
                     if ( ( _pool.row[y] & ( 1 << x ) ) == 0 ) {
+                        // 空白のとき
+                        // Open Holeを含む
                         pool_total_cell++;
                     }
                 }
             }
+
             for ( int x = 0; x < pool_w; ++x) {
                 int last = 0, next;
                 first_hole_y[x] = pool_h + 1;
-                int y = (x>0) ? std::min(min_y[x] + 1, std::max(min_y[x-1] + 6, min_y[x+1] + 6)) : min_y[x] + 1;
+
+                // x列の最も上にあるブロックの位置を探索開始に設定
+                // min_y[x]上は必ずブロックなので、min_y[x] + 1でひとつ下の段から探索を始める
+                // ただし、隣の高さより5段以上高い列は、隣の高さ+5の値を使用して、探索を少しスキップする
+                int y = (x>0)
+                        ? std::min(min_y[x] + 1, std::max(min_y[x-1] + 6, min_y[x+1] + 6))
+                        : min_y[x] + 1;  // x == 0 のとき  // TODO なぜここだけ隣の高さを見ていない？
+
+                // フィールド上から確認していく
                 for ( ; y <= pool_h; ++y, last = next) {
-                    if ( ( _pool.row[y] & ( 1 << x ) ) == 0 ) { //_pool.row[y] && 
+                    if ( ( _pool.row[y] & ( 1 << x ) ) == 0 ) { //_pool.row[y] &&
+                        // ブロックがないとき = 穴である
+
+                        // 係数の計算
+                        // 高いほど大きい (y=0のとき0.525。y=19のとき0.05)
+                        // ただし、20<=yほど低いときは 1.0
                         double factor = ( y < 20 ? ( 1 + (20 - y) / 20.0 * 2 ) : 1.0);
+
+                        // x列にある穴の数をカウントアップ
+                        // Open Holeを含む
                         y_holes[x]++;
+
                         next = 1;
                         if ( softdropEnable() ) {
+                            // ■ open_hole
+                            // ソフトドロップが有効なときのみ、スコアを調整
+
+                            // Open Holeによるスコアの調整
+                            // Open Holeとは、左2列（右2列）の一番高いブロックより上にある穴のこと
+                            // http://fumen.zui.jp/?v115@EgG8CeG8CeG8DeF8CeG8CeG8CeG8CeG8BeH8AeI8Je?AgHigAtLfAAPVAS4JSASoTABEoo2APJtJE/cTDEFBAAALgA?8IeA8IeA8IeB8HeB8HeB8HeB8HeB8AAGeA8AeAAQeAAA3fB?8HeA8feglLfAAPdAiSw+BFbcRATG88AQlrTASIyQEFG98AQ?cTDEFBAAA3fBAHeAAfegHgWKfAAABgA8JeA8IeA8IeA8Aeg?0glKfAAA
+
+                            // Open Holeをみつけると、悪いスコアを与える
+
+                            // 「ソフトドロップが有効なとき」だけ計算するのは、
+                            // まだ埋められそうな穴に対して、個別に 悪い/良い スコアを与えて、なるべく穴を なくす/残す 動きをしてほしいため？
+                            // （穴を埋められると、相対的に 良い/悪い スコアとなる）
+
+                            // よく考えたら、蓋などをして、Openではなくなるような動きをするかもしれない
+                            // （Hole自体を塞げなくても、Open Holeによるスコアを回避できる）
+
                             if ( x > 1 ) {
                                 if (min_y[x-1] > y && min_y[x-2] > y) {
+                                    // 左2列の高さよりも高い位置にある穴である
+
                                     //if ( last == 0) {
                                     hole_score += ai_param.open_hole * factor;
+
+                                    // y行ごとにOpen Holeの数をカウントアップ
                                     if ( y >= 0 ) ++x_op_holes[y];
+
+                                    // Open Holeのときは、通常のHoleの調整はスキップ
                                     continue;
                                     //}
                                 }
                             }
+
                             if ( x < pool_w - 2 ) {
                                 if (min_y[x+1] > y && min_y[x+2] > y) {
+                                    // 右2列の高さよりも高い位置にある穴である
+
                                     //if ( last == 0) {
                                     hole_score += ai_param.open_hole * factor;
+
+                                    // y行ごとにOpen Holeの数をカウントアップ
                                     if ( y >= 0 ) ++x_op_holes[y];
+
+                                    // Open Holeのときは、通常のHoleの調整はスキップ
                                     continue;
                                     //}
                                 }
                             }
                         }
+
+                        // ■ hole
+                        // Open Holdはここでの処理は実行されない
+
+                        // x列ごとにHoleの数をカウントアップ
+                        // Open Holeは含まない
                         if ( y >= 0 ) ++x_holes[y];
+
+                        // そのx列で、最も高い位置にある穴のy座標を記録
+                        // Open Hole は含まない
+                        // first_hole_y[x]は pool_h + 1 で初期化されているため、最初の1回目は必ず実行されている
+                        // そのあと、配列値が更新されるが、yはpool_h以下なので、この条件式が真にならない
                         if ( first_hole_y[x] > pool_h ) {
                             first_hole_y[x] = y;
                         }
+
+                        // Holeによるスコアの調整
+                        // Holeがみつかるほど悪いスコアを与える
+                        // ただし、連続したHoleにはある程度、スコアを控えめにする
+
+                        // last: 1段上が穴のとき1
+
                         int hs = 0;
                         if ( last ) {
+                            // 穴が続いているとき
+
                             hs += ai_param.hole / 2;
+
+                            // y行ごとに連続するHoleの数をカウントアップ
+                            // Open Holeは含まない
                             if ( y >= 0 ) ++x_renholes[y];
                         } else {
                             hs += ai_param.hole * 2;
                         }
+
                         {
                             //if ( x_holes[y] == 2 ) {
                             //    hs -= ai_param.hole;
                             //} else if ( x_holes[y] >= 3 ){
                             //    hs -= ai_param.hole * 2;
                             //}
+                            // 穴の数をカウントアップ
+                            // Open Holeは含まない
                             ++total_hole;
                         }
+
                         hole_score += hs * factor;
                     } else {
                         next = 0;
                     }
                 }
             }
+
             //for ( int y = 0; y <= pool_h; ++y) {
             //    if ( x_holes[y] > 1 ) {
             //        int n = x_holes[y] - x_renholes[y];
@@ -289,12 +449,23 @@ namespace AI {
             //        score -= ai_param.v_transitions * x_holes[y] / 10;
             //    }
             //}
+
+            // ■ hole_dis
+            // 高い位置に穴があるほどスコアが悪くなる
+
+            // 最も高い位置にある穴に対してスコアをつける
+            // フィールド上から確認していく
             for ( int y = 0; y <= pool_h; ++y) {
                 if ( x_holes[y] > 0 ) {
+                    // y行に穴があるとき
+
                     score += ai_param.hole_dis * (pool_h - y + 1);
+
+                    // 最初の穴が見つかったらスキップ
                     break;
                 }
             }
+
             if(1)
             if ( ai_param.hole_dis_factor ) {
                 for ( int y = 0, cnt = 5, index = -1; y <= pool_h; ++y) {

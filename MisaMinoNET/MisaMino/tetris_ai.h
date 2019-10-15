@@ -270,4 +270,9 @@ namespace AI {
     MovingSimple AISearch(AI_Param ai_param, const GameField& pool, int hold, Gem cur, int x, int y, const std::vector<Gem>& next, bool canhold, int upcomeAtt, int maxDeep, int & searchDeep);
 	int score_avoid_softdrop(int param, bool sd, int cur, bool wk, double h);
     Gem RunAI(Moving& ret_mov, int& flag, const AI_Param& ai_param, const GameField& pool, int hold, Gem cur, int x, int y, const std::vector<Gem>& next, bool canhold, int upcomeAtt, int maxDeep, int & searchDeep);
+
+    int Evaluate(
+            long long &clearScore, double &avg_height, const AI_Param& ai_param, const GameField& last_pool, const GameField& pool, int cur_num,int curdepth,
+            int total_clear_att, int total_clears, int clear_att, int clears, signed char wallkick_spin,int lastCombo, int t_dis, int upcomeAtt
+    );
 }
