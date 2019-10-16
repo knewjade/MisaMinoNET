@@ -25,7 +25,8 @@ namespace AI {
     struct GameField {
         signed char m_w, m_h;  // フィールドの幅、高さ
         signed short combo;  // 現在続いているコンボ数 // 1回目のライン消去で1。つまり通常のRENより1大きい
-        int b2b;  // 現在続いているb2b数 // 1回目のTスピン・テトリスで1
+        // B2Bは 壁蹴り+ライン消去 で発生する
+        int b2b;  // 現在続いているb2b数 // 1回目のTスピン・テトリスで1  // つまりB2Bが続いている状態を表すため、実際にB2Bが発生した回数ではない
         unsigned long m_w_mask;  // 1段すべてがうまっているときを表すマスク
         unsigned long m_row[AI_POOL_MAX_H];  // フィールドデータ  // 表示部分以外の状態も持っている
         int m_hold;  // ホールドしているミノの種類

@@ -32,6 +32,8 @@ namespace AI {
         }
     }
 
+    // @param total_clear_att 探索中に送ったライン数
+    // @param total_clears 探索中に消去されたライン数
     int Evaluate( long long &clearScore, double &avg_height, const AI_Param& ai_param, const GameField& last_pool, const GameField& pool, int cur_num,
         int curdepth,
         int total_clear_att, int total_clears, int clear_att, int clears, signed char wallkick_spin,
@@ -452,6 +454,7 @@ namespace AI {
 
             // ■ hole_dis
             // 高い位置に穴があるほどスコアが悪くなる
+            // 対象となる穴は一番高い位置にあるもののみ
 
             // 最も高い位置にある穴に対してスコアをつける
             // フィールド上から確認していく
@@ -466,19 +469,50 @@ namespace AI {
                 }
             }
 
+            // ■ hole_dis_factor
+            // hole_disの複数個版
+            // 地形の表面から穴までの距離、上から何番目の穴かによって減点される幅が調整される
+            // 対象となる穴は、高い位置にある最大5個の穴
+
             if(1)
             if ( ai_param.hole_dis_factor ) {
+                // フィールド上から確認していく
                 for ( int y = 0, cnt = 5, index = -1; y <= pool_h; ++y) {
                     if ( x_holes[y] > 0 ) {
+                        // その行に穴があるとき
+
+                        // 上から5段分が対象
                         if ( cnt > 0 ) --cnt, ++index;
                         else break;
+
+                        // 実際の値
+                        // cnt=4, index=0
+                        // cnt=3, index=1
+                        // cnt=2, index=2
+                        // cnt=1, index=3
+                        // cnt=0, index=4
+
                         for ( int x = 0; x <= pool_w; ++x) {
                             if ( ( _pool.row[y] & ( 1 << x ) ) == 0) {
+                                // 穴であるとき
+
+                                // その列の一番上のブロックから穴までの距離
+                                // 穴が、一番高いところから遠くにあればあるほどhが大きくなる
                                 int h = y - min_y[x];
+
+                                // 基本的に後で見つかる穴ほど、hが小さくなるよう調整される
+                                // if ( h > 4 - index ) -> ある程度、hが小さくなりすぎないようにしている？
+                                // h = 4 + ... の `4` が `(4 - index)` なら、割とわかりやすい式
+                                //     `(4 - index)` がベースとなり、それを超過した部分を `cnt / 4` で圧縮する
                                 if ( h > 4 - index ) h = 4 + (h - (4 - index)) * cnt / 4;
+
                                 //if ( h > 4 ) h = 4;
                                 if ( h > 0 ) {
                                     if ( ( _pool.row[y - 1] & ( 1 << x ) ) != 0) {
+                                        // 穴のひとつ上がブロックのとき
+                                        // スコアを調整
+                                        // 最初に見つかる穴ほど大きく調整される
+
                                         score += ai_param.hole_dis_factor * h * cnt / 5 / 2;
                                     }
                                 }
@@ -487,27 +521,59 @@ namespace AI {
                     }
                 }
             }
+
+            // ■ hole_dis_factor2
+            // 空白の数が多いほどスコアが悪くなる
+            // そのまま空白の数を数えると、穴ではない普通の空白がカウントされてしまうため、
+            // ざっくり穴のありそうな高さ(miny)を探して、minyより低い位置にある空白を数える
+
             if(1)
             if ( ai_param.hole_dis_factor2 ) {
+                // 高い位置にある穴から順に cnt=1,2,3,4,5 とつける
+                // 同じ高さにある穴は同じ cnt となる
+
+                // `列の高さ + cnt` で最も小さいもの
+                // より地形が高くて、穴も他と比べて高いところにあると、数値がより小さくなる
                 int miny = pool_h;
+
+                // フィールド上から確認していく
                 for ( int y = 0, cnt = 0; y <= pool_h; ++y) {
                     if ( x_holes[y] > 0 ) {
+                        // その行に穴があるとき
+
+                        // 上から4段分の穴が対象
                         if ( cnt < 4 ) ++cnt;
                         else break;
+
+                        // 実際の値
+                        // cnt=1
+                        // cnt=2
+                        // cnt=3
+                        // cnt=4
+                        // cnt=5
+
                         for ( int x = 0; x <= pool_w; ++x) {
                             if ( ( _pool.row[y] & ( 1 << x ) ) == 0) {
+                                // `その列の高さ + 穴の数` で最も小さいものを探す
                                 int vy = min_y[x] + cnt * 1;
                                 if ( vy < miny ) miny = vy;
                             }
                         }
                     }
                 }
+
+                // 穴がみつからないケースを含め、全列 cnt=6 として計算
                 for ( int x = 0; x <= pool_w; ++x) {
                     int vy = min_y[x] + 6;
                     if ( vy < miny ) miny = vy;
                 }
+
+                // フィールド上から確認していく
+                // minyから探す  // emptysには穴ではない空白も含まれるので、それを除きたい意図があると思われる
                 double total_emptys = 0;
                 for ( int y = miny; y <= pool_h; ++y ) {
+                    // 係数は y=10 よりフィールド下なら 1.0。それより高いところは高い分だけ係数が大きくなる
+                    // 高い位置の空白が、より悪くなるようにしている
                     total_emptys += emptys[y] * ( y < 10 ? (10 + 10 - y ) / 10.0 : 1);
                 }
                 score += ai_param.hole_dis_factor2 * total_emptys / 4;
@@ -529,23 +595,40 @@ namespace AI {
         }
         score += pool_hole_score;
 
-        // �߶Ȳ�
+        // ■ h_factor
+        // 隣との高さが大きく変化すると、悪いスコアを与える
+        // ただし、一番低い列の左右の差は基本的に無視する
+
+        // 高度差
         {
             //int n_maxy_index = maxy_index;
             //if ( maxy_cnt != 0 ) n_maxy_index = -9;
 
+            // ひとつ前の壁(x-1)の高さ
+            // 最初に見る x==0 は比較対象がないので、反対側の隣 x=1 をみる
             int last = min_y[1];
             for ( int x = 0; x <= pool_w; last = min_y[x], ++x) {
+                // ひとつ前と高さがどのくらい変わるか
+                // x列のほうがひとつ前より高いとき、vは0より小さい値にとなる
                 int v = min_y[x] - last;
+
                 if ( x == maxy_index ) {
+                    // 地形が平らなことがわかっているのでスキップ
                     x += maxy_flat_cnt;
                     continue;
                 }
+
+                // 絶対値に変換
                 int absv = abs(v);
+
+                // 一番低いところ と その前の段差はスキップ
+                // 一番低いところ と その先の段差はスキップ （ただし何故か x - 2 なので2つ隣との差をみている）
+                // そのため、基本的にスコアは8回調整されるはず  // 一番端が低いときはその限りではない
                 if ( x + 1 == maxy_index && v > 0 || x - 2 == maxy_index && v < 0 ) ; //
                 else score += absv * ai_param.h_factor;
             }
         }
+        // 平地
         // ƽ��
         /*
         {
@@ -566,38 +649,78 @@ namespace AI {
             }
         }
         */
+        // ■ miny_factor
+        // ミノが出現する4列（x=3,4,5,6）の中で最も高いところがy=8を超えているとスコアを減点
+        // 高ければ高いほどより減点
+
+        // ■ dif_factor
+        // 各列の高さが、すべての列の高さの平均から離れているほど、スコアが悪くなる
+        // フィールドが全体的に平らなほどスコアは良くなる。
+        // 高さは各列の一番上のブロックの位置をもとに計算するため、長い直列をつくるより、
+        // アンカーセットなどで底上げされているほうが良いスコアになると思われる
+
+
+        // avg < pool_w * center しているため、全体的にどのくらいのブロックがあれば危険と判断するか
+        // center=10だと、ざっくりフィールドの半分くらいがうまると危険とする
+        // centerは定数  // パラメータではない
+        // 最終的にwarning_factorに反映される  // スコアには直接反映されない
         int center = 10; // ��¥������
+
+        // 危険と判断されたとき、小さくなる値
+        // あとでスコア値を調整するのに利用される
+        // Tスピンなど良い行動でも、危険な状態で行うのを防ぐ
         double warning_factor = 1;
+
+        // 未使用
         int h_variance_score = 0;
-        // �㷽��
+
+        // 分散によるスコア
         {
+            // 各列の高さの合計値（平均の割る前）  // 実質的にブロックの合計数  // 穴は考慮せずにざっくり計算している
+            // 値が小さいほど高い=ブロックが多い ので注意
             int avg = 0;
             {
+                // 未使用
                 int sum = 0;
                 int sample_cnt = 0;
+
+                // すべての列の高さを合計
                 for ( int x = 0; x < pool_w; ++x) {
                     avg += min_y[x];
                 }
+
                 if (0)
                 {
+                    // Unreachable
                     double h = pool_h - (double)avg / pool_w;
                     score += int(ai_param.miny_factor * h * h / pool_h);
                 }
                 else
                 {
-                    int h = std::min(std::min(min_y[gem_beg_x], min_y[gem_beg_x+1]), std::min(min_y[gem_beg_x+2], min_y[gem_beg_x+3]));
+                    // 出現位置周辺の4列（x=3,4,5,6）の中で一番高い列の高さを取得
+                    int h = std::min(
+                            std::min(min_y[gem_beg_x], min_y[gem_beg_x+1]),
+                            std::min(min_y[gem_beg_x+2], min_y[gem_beg_x+3])
+                    );
                     if ( h < 8 )
                     {
+                        // 8より高いときは減点する
                         score += int(ai_param.miny_factor * ( 8 - h ) * 2);
                     }
                 }
+
                 if (1)
                 {
+                    // フィールド全体的にブロックが多いときはwarning_factorを小さくする
                     if ( avg < pool_w * center ) {
+                        // avg / pool_w = 10 のとき 1.0
+                        // avg / pool_w = 5 のとき  0.2
                         warning_factor = 0.0 + (double)avg / pool_w / center / 1;
                     }
                 }
-                // ƫ��ֵ
+
+                // 偏差値  // 統計用語の偏差値 `standard score` と厳密には異なるので注意
+                // 列ごとにブロック数をざっくり計算し、平均値との差を計算。その和を係数とする
                 {
                     int dif_sum = 0;
                     for ( int x = 0; x < pool_w; ++x) {
@@ -606,49 +729,129 @@ namespace AI {
                     score += ai_param.dif_factor * dif_sum / pool_w / pool_w;
                 }
             }
-            // ��������
+
+            // ■ b2b
+            // B2Bが続いている状態に対してスコアを加点する  // B2Bを使って攻撃した瞬間に対してではない
+            // フィールドが低いほど調整されるスコア幅が大きくなる
+            // パラメータ化されている分子より、定数として埋め込まれている分母の影響のほうが大きそうな印象
+
+            // ■ clear_efficient
+            // 高い火力を送れた状態に対してスコアを加点する
+            // 計算式はシンプルに `パラメータ * 探索中に送った段数`
+            // つまり、見えているネクストの中で高い火力を出せれば、良いスコアとなる
+            // （人間ではT・Iミノが見えていなくても、次のT・Iミノまで積み込むことを考えられるが、
+            // 少なくともこのパラメータでは見えているミノで火力を最大にしようとする）
+            // パラメータ名から 効率（少ない消去ライン数でより大きな攻撃を送れたか） に関するものを思っていたが、そうではないらしい
+
+            // ※ 相手から火力を4段以上受けたときに、相殺しながら高い火力を出すと、良いスコアがもらえる
+
+            // ■ clear_useless_factor
+            // ライン消去をしたらスコアを減点する
+            // Tスピン・テトリス関係なく、ラインを消したら、すべて等しく減点されるので注意
+            // フィールドが危険な状態（地形が高い）のときは、減点される量が緩和される
+
+            // ※ 相手から火力を4段以上受けたときに、相殺しながらライン消去をすると、良いスコアがもらえる
+
+            // ■ tspin3
+            // ■ tspin
+            // ■ tmini
+            // TSS, TSD, TSTに成功したとき、スコアを加点する
+            // フィールドが危険な状態（地形が高い）のときは、加点される量が少なくなる
+            // パラメータtminiの値が0のとき、Miniを避けるように最悪のスコアを与える (オリジナルにはない機能)
+
+            // ■ upcomeAtt
+            // 相手から4段以上の火力を受けていて、かつ自身の地形が低いとき、Tスピンに悪いスコアを与える
+            // つまり、このパラメータをあげるほど、相殺を外しやすくなる
+            // 相殺外しの判断をする、より詳細な条件はコード参照
+
+            // 攻撃計算
             {
                 int s = 0;
                 int t_att = total_clear_att;
                 double t_clear = total_clears; //+ total_clears / 4.0;
-				double h = pool_h - (double)avg / pool_w;
-                if ( pool.b2b ) s -= (int) ((double)(ai_param.b2b * 5) / (1 + (TSD_only? 0 : pow(5, h - 6.5)))) + 2; // b2b score
+
+				// フィールド全体のブロックが多いほど avgは小さい=hは大きくなる
+				// B2Bが続いている状態に対してスコアを加点する  // B2Bを使って攻撃した瞬間に対してではない
+				// hが大きくなる -> 分母が大きくなる -> 加点量が小さくなる
+                double h = pool_h - (double)avg / pool_w;
+                if ( pool.b2b ) s -= (int) (
+                        (double)(ai_param.b2b * 5) / (1 + (TSD_only? 0 : pow(5, h - 6.5)))
+                ) + 2; // b2b score
+
                 if ( t_clear > 0 ) {
+                    // 探索中にライン消去が発生しているとき
+
+                    // 火力に対して、スコアを調整
                     s -= int( ((ai_param.clear_efficient) * ( t_att ) ) );
                 }
+
+                // ライン消去が発生したら減点
+                // フィールドが危険な状態なら、減点する量を緩和する
                 {
                     //if ( t_clear > t_att ) {
                         //int warning_factor = 0.5 + (double)avg / pool_w / center / 2;
                         s += int( warning_factor * t_clear * ai_param.clear_useless_factor);
                     //}
                 }
+
                 int cs = 0;
                 if ( cur_num == GEMTYPE_T && wallkick_spin && clears > 0 && ai_param.tspin > 0 ) { // T�����ӷ֣�Ҫ��T1/T2��״�����ִ�һ
+                    // Tスピンによる攻撃をしたとき
+
+                    // ホールドTと同じスコアを加点する
                     s -= ai_param.hold_T;
+
+                    // warning_factorはフィールドが危険（高い）なとき、小さくなる値
+                    // 調整量にhole系の値を加えているのは、Tスピンするには一時的に穴を作るため、それを考慮してのこと？
+
                     if ( clears >= 3 ) {
                         if ( clear_att >= clears * 2 ) { // T3
+                            // TST成功
                             cs -= int( warning_factor * (ai_param.tspin3 * 8 ) + ai_param.hole * 2 );
                         }
                     } else if ( clears >= 2 ) {
                         if ( clear_att >= clears * 2 ) { // T2
+                            // TSD成功  // Miniは避ける
+
                             cs -= int( warning_factor * (ai_param.tspin * 5 + ai_param.open_hole / 2) );
                         }
                     } else if ( wallkick_spin == 1 ) { // T1
+                        // TSS成功
+
                         cs -= int( warning_factor * (ai_param.tspin * 1 + ai_param.open_hole / 2) );
                     } else if ( wallkick_spin == 2 ) { // Tmini
-						cs -= int(warning_factor * (ai_param.tmini / 2));
+                        // TSM成功
+
+                        cs -= int(warning_factor * (ai_param.tmini / 2));
+
+                        // パラメータtminiが0のときは、Miniを避けるようにする
 						if (ai_param.tmini == 0) cs += 100000000;
                     }
                 }
+
+                // 引数経由で score2 に記録される
                 clearScore += cs;
 
                 if (1)
                 if ( clears > 0 && upcomeAtt >= 4 && ai_param.upcomeAtt > 0 ) {
+                    // 自身がライン消去をしたとき、すでに送られている火力が4以上あるとき
+
+                    // 良いスコアを与える
+                    // `clear_efficient * 自身の火力`
+                    // `clear_useless_factor * 自身の消去ライン` (フィールドが危険な状態だともらえる加点が減る)
                     int cur_s = 0;
                     cur_s -= int( ((ai_param.clear_efficient) * ( clear_att ) ) )
                         - int( warning_factor * clears * ai_param.clear_useless_factor);
+
+                    // 地形の高さの平均値が(12+火力)段を受けても大丈夫そうで、
+                    // これまでに貰った火力によるスコアが良い（良い攻撃をできる地形である）とき減点する。
+                    // 相殺を当てるより、外したほうが良いとの判断。
+                    // (cur_s + cs)がマイナス、( avg - (12 + upcomeAtt) * pool_w )がプラスなので、全体はマイナスになる。
+                    // つまり、マイナス値を-=するから減点
+                    // ai_param.upcomeAttが大きいほど悪くなる（より相殺外しをしやすくなる）
                     if ( avg - (12 + upcomeAtt) * pool_w > 0 && cur_s + cs < 0 )
                         s -= (cur_s + cs) * ( avg - (12 + upcomeAtt) * pool_w ) * ai_param.upcomeAtt / pool_w / 10 / 20;
+
                     //if ( upcomeAtt >= 4 ) {
                     //    if ( total_hole < 4 && avg - upcomeAtt * pool_w >= 8 * pool_w ) {
                     //        s = s - s * ( 4 - total_hole ) * ai_param.upcomeAtt / 40;
@@ -658,6 +861,7 @@ namespace AI {
 
                 score += s;
             }
+
             //if ( clears ) {
             //    int center = 10; // ��¥������
             //    double factor = 1;
@@ -725,85 +929,169 @@ namespace AI {
             //}
         }
 
-        // ������״�ж�
+        // 特殊形状判定
 
-        // ����ɹ�����Tetris��T2��
+
+        // テトリスとTSD
         //int t2_x[32] = {0};
         if ( maxy_cnt == 0 )
         {
+            // どこかの列が単独で一番低い（=一番低いところと同じ高さの列が他にない）
+
             //if ( maxy_index == 0 || maxy_index == pool_w - 1 ) {
             //    score += ai_param.att_col_sel_side;
             //}
+
             int ybeg = 0;
             if ( softdropEnable() && maxy_index > 0 && maxy_index < pool_w - 1 && ai_param.tspin > 0 ) { // T1/T2������״��
+                // Tスピンを目指す
+                // 一番低い列が端ではない
+
+                // 一番低い列の左右で低いほうのブロックのy座標
+                // ybegのy座標にTの凸がくるはず
                 ybeg = std::max( min_y[maxy_index - 1], min_y[maxy_index + 1] );
+
                 if ( min_y[maxy_index - 1] == min_y[maxy_index + 1]
                     && x_holes[ybeg] == 0 && (!ybeg || x_holes[ybeg-1] == 0)
                     && x_op_holes[ybeg] == 0 && (!ybeg || x_op_holes[ybeg-1] == 0)
                     )
                 { // T׼��
+                    // 左右の高さがそろっている
+                    // ybegとその上の段に穴がない
+
+                    // x=maxy_index, y=ybeg にTSDをつくろうとする
+
                     int cnt = 0;
+
+                    // 屋根をつけられそうか。つけられそうなとき cnt をカウントアップ
+                    // `min_y[maxy_index - 2] >= min_y[maxy_index - 1] - 2` を 満たさない例
+                    //   v --- maxy_index
+                    // X____
+                    // X____
+                    // X____
+                    // XX_XX
                     if ( maxy_index > 1 && min_y[maxy_index - 2] >= min_y[maxy_index - 1] - 2 ) ++cnt;
                     if ( maxy_index < pool_w - 2 && min_y[maxy_index + 2] >= min_y[maxy_index + 1] - 2 ) ++cnt;
+
                     if ( cnt > 0 )
                     {
+                        // 屋根がつけられそう
+
+                        // スコアを加点。フィールドが危険な状態のときは少し減らす
                         score -= int(warning_factor * ai_param.tspin);
+
+                        // Tの凸にあたるラインについて、T以外のブロックが埋まっていることを確認する
                         if ( (~pool.row[ybeg] & pool.m_w_mask) == (1 << maxy_index) ) { // T1����
+                            // スコアを加点
                             score -= int(warning_factor * ai_param.tspin);
+
+                            // Tの幅3にあたるラインについて、T以外のブロックが埋まっていることを確認する
                             if ( (~pool.row[ybeg - 1] & pool.m_w_mask) == (7 << (maxy_index-1) ) ) { // ��T2������
+                                // TSDの形が屋根以外完成している
+
+                                // スコアを加点  // Tの横に高い壁がなければより良いスコアになる
                                 score -= int( warning_factor * (ai_param.tspin * cnt) );
                             }
                         }
                     }
                 } else if ( ybeg <= 6 && ybeg - t_dis > 1 || ybeg > 6 ) {
+                    // 左右の高さがそろっていない or ybegとその上の段に穴がある
+                    // Tスピン予定の位置がy=6より低い位置か、すぐにTが手に入る状態であるか
+
+                    // Tの幅3にあたるライン
                     int row_data = pool.row[ybeg - 1];
+
                     if ( (row_data & ( 1 << (maxy_index-1) ) ) == 0 && (row_data & ( 1 << (maxy_index+1) ) ) == 0 // �ӵ�����Ϊ��
                          && x_holes[ybeg] == 0 && (!ybeg || x_holes[ybeg-1] == 0) // ����λ���޶�
                          && x_op_holes[ybeg] == 0 && (!ybeg || x_op_holes[ybeg-1] <= 1)
                          )
                     {
+                        // Tの幅3にあたるスペースがある
+                        // ybegとその上の段に穴（Open Holeは除く）がない
+                        // ybegの段にOpen Holeがない
+                        // ybegの上の段にOpen Holeが1つ以下である (すでに屋根がついている可能性)
+
                         // T����״
                         if ( ( pool.row[ybeg] & (1 << (maxy_index-1)) ) && ( pool.row[ybeg] & (1 << (maxy_index+1)) ) ) { // �ӵ������������
+                            // Tの幅3にあたるスペースがある
+
                             if ( !!( pool.row[ybeg-2] & (1 << (maxy_index-1)) ) + !!( pool.row[ybeg-2] & (1 << (maxy_index+1)) ) == 1 ) { // �ӵ�����Ŀ����
+                                // Tの屋根部分について、左右どちらかに一方にブロックがある
+
                                 double s = 0;
                                 //t2_x[maxy_index] = ybeg;
+
+                                // スコアの調整量
+                                // Tスピンの位置が低いとき → 通常0.5、危険0.2
+                                //               高い     → Tが早いほど大きい 通常 変化量が線形、危険 T=0のときは3.0で急激に小さくなっていく
                                 double factor = ybeg > 6 ? 0.5 : 1 - t_dis / 6.0 * 0.5;
                                 if ( warning_factor < 1 )
                                     factor = ybeg > 6 ? 1.0 / 5 : 1 / (1 + t_dis / 3.0);
+
+                                // Open Hole1つ加点（屋根下のスペース分）
                                 s += ai_param.open_hole;
+
+                                // Tの凸にあたるラインについて、T以外のブロックが埋まっていることを確認する
                                 if ( (~pool.row[ybeg] & pool.m_w_mask) == (1 << maxy_index) ) { // ��T1
+                                    // スコアを加点
                                     s += ai_param.tspin + ai_param.tspin * 1 * factor;
+
+                                    // Tの幅3にあたるラインについて、T以外のブロックが埋まっていることを確認する
                                     if ( (~row_data & pool.m_w_mask) == (7 << (maxy_index-1) ) ) { // ��T2������
+                                        // TSDの形が屋根を含めてすべて完成している
+
+                                        // スコアを加点
                                         s += ai_param.tspin * 3 * factor;
                                         // s -= ai_param.tspin * 3 / factor / 1;
                                     }
                                 } else {
+                                    // 埋まっていなくてもスコアを加点
                                     s += ai_param.tspin * 1 + ai_param.tspin * 2 * factor / 2 ;
                                 }
+
+                                // スコアに調整量を反映する
                                 score -= int( warning_factor * s );
                             }
                         }
                     }
                 }
             } else {
+                // 一番低い列が端  // そのほかソフトドロップ不可など
+
+                // 一番低い列の横のブロックの高さをvbegにいれる
                 if ( maxy_index == 0 ) {
                     ybeg = min_y[maxy_index + 1];
                 } else {
                     ybeg = min_y[maxy_index - 1];
                 }
             }
+
+            // vbeg = 一番低い列の隣の列のうち、低いほうの高さ （一番上のブロックの位置）
+
             int readatt = 0;
             int last = pool.row[ybeg];
+
+            // フィールド上から確認していく
             for ( int y = ybeg; y <= pool_h; ++y ) {
+                // 上の段と同じ状態が続いている
                 if ( last != pool.row[y] ) break;
+
+                // 空白が1になるよう反転
                 int row_data = ~pool.row[y] & pool.m_w_mask;
+
+                // 空白が1つだけであるか
                 if ( (row_data & (row_data - 1)) != 0 ) break;
+
+                // テトリス穴である
                 ++readatt;
             }
+
+            // テトリスできる
             if ( readatt > 4 ) readatt = 4;
             //score -= readatt * ai_param.readyatt;
 
         }
+
         // T3 形状判定 (Shape jugdement/ how to determine tst shape?)
         //3001	
         //2000	
@@ -1002,6 +1290,7 @@ namespace AI {
                 }
             }
         }
+
         // 4W��״�ж�
         if ( USE4W )
         if ( ai_param.strategy_4w > 0 && total_clears < 1 ) //&& lastCombo < 1 && pool.combo < 1 )
@@ -1107,7 +1396,7 @@ namespace AI {
     struct MovsState {
         MovingSimple first;  // この操作の前に行われた操作で、探索開始直後の最初のもの  // スコア値はこの中に保存されている
         GameField pool_last;
-        int att, clear;
+        int att, clear;  // 相殺してもattは変化しない
         signed short max_combo, max_att, combo;  // max_combo, comboは純粋なコンボ数ではなく、コンボ数に応じたスコア値なので注意
         signed short player, upcomeAtt;  // upcomeAtt=受け取る火力。マイナスのときは、確定した火力でabs(upcomeAtt)だけすでに受け取ったことを表す。プラスの時は相殺できるが、マイナスの時はできない。
         MovsState() { upcomeAtt = max_combo = combo = att = clear = 0; }
@@ -1606,7 +1895,7 @@ namespace AI {
                     continue;
                 }
 
-                // 実質的に未使
+                // 実質的に未使用
                 max_combo = std::max( max_combo, (int)ms_last.pool_last.combo );
                 if (0)
                 if ( pq_size != pqmax_size ) { // ����combo�����combo��֦
