@@ -349,6 +349,9 @@ namespace AI {
         void setBlock(int x, int y) {
             row[y + 1] |= 1U << (unsigned) x;
         }
+        void setBlockDirect(int x, int y) {
+            row[y] |= 1U << (unsigned) x;
+        }
         void addRow( int rowdata ) {
             for ( int h = -gem_add_y + 1; h <= m_h; ++h ) {
                 row[h-1] = row[h];

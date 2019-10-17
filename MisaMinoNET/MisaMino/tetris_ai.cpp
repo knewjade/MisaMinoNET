@@ -1106,18 +1106,41 @@ namespace AI {
         //1011
         if ( softdropEnable() && ai_param.tspin3 > 0 )
         {
+            // ソフトドロップが有効で、tspin3のパラメータが正
+
+            // フィールド上から確認していく
             for ( int y = 3; y < pool_h; ++y ) {
+                // 穴がないときはスキップ
                 if ( x_holes[y] == 0 ) continue;
+
+                // フィールドの端以外
                 for ( int x = 1; x < pool_w - 1; ++x ) {
+                    // yの下
                     if ( ( pool.row[y + 1] & ( 1 << x ) ) == 0 || ( pool.row[y + 1] & ( 1 << x ) ) == 0  ) {
+                        // x, yの上下、どちらにも穴がない  // はずが条件文がどちらもy+1
                         continue; // 上下无洞 (No holes top or bottom)
                     }
+                    
+                    // 
                     int row_y[5];
                     for ( int i = 0; i < 5; ++i ) {
+                        // 11000000000011 のように左右を11で囲う  // 幅14になる
+                        // row_yにxでアクセスすると、左2個隣のマスにアクセスすることになるので注意
                         row_y[i] = ( (pool.row[y - 3 + i] | (3 << pool_w)) << 2 ) | 3;
                     }
+
+                    // フィールドの形をみているif文のマスクの形
+                    // []はrow_yの添字
+                    // X is any. 1 is block. 0 is empty
+                    // [1] 000
+                    // [2] 110
+                    // [3] 100    < y = 0
+                    // [4] 1X01    // ここのXが埋まっていることは上の条件式で別途確認済み
+                    //      ^------ x (row_yではx+2になる)
                     if ( ( (row_y[3] >> (x + 1)) & ( 7 ) ) == 1 /*100*/ ) { // 上图情况 (See above diagram)
+                        // x == 8 のとき スキップ
                         if ( x == pool_w - 2 ) continue;
+
                         //if ( t2_x[x+1] == y ) continue; // 排除T2坑 (ignore tsd hole)
                         // 所有空的地方先匹配 (Match all empty space first)
                         if (   ( (row_y[2] >> (x + 1)) & ( 7 ) ) != 3 /*110*/
@@ -1128,80 +1151,185 @@ namespace AI {
                             ) {
                             continue;
                         }
+
+                        // x列(Tスピンの凸にあたる列)とその左の列の一番高いブロック位置が、[2]のブロックと同じ高さ
                         if ( min_y[x] != y - 1 || min_y[x-1] != y - 1 ) {
+                            // [0] 0000
+                            // [1] 1000
+                            // [2] X110
+                            // [3] X100
+                            // [4] X1101
+                            //      ^^
                             continue;
                         }
+
                         if ( ( row_y[0] & ( 1 << (x) ) ) == 0 && ( row_y[1] & ( 1 << (x) ) ) ) {
+                            // [0] 0000     <- [1]に壁があって、[0]に壁がない状態は、回転入れできないので避ける
+                            // [1] 1000
+                            // [2] X110
+                            // [3] X100
+                            // [4] X1101
+                            //     ^--------row_yにおけるxはここ
+
                             continue; // 高处转角 (High turning corner -> Overhang for kick?)
                         }
+
+                        // Tが縦に3つ並ぶ列の最大高さで屋根あり・なしをざっくり判定
+                        // TSTのTミノスペースのほかに隙間がないか確認
                         if ( min_y[x + 1] > y ) { // 洞判定 (find holes)
+                            // ブロックがない  // 一番高いところがTより下 = 屋根がない
+
+                            // 穴の数がTの形と同じか確認する  // 同じ行の他のところに穴がないか確認  // 穴が多いときはスキップ
                             if ( x_holes[y - 1] > 0 || x_holes[y + 1] > 0 || x_holes[y] > 1
                                 || x_op_holes[y - 1] > 0 || x_op_holes[y + 1] > 0 || x_op_holes[y] > 0)
                             {
                                 continue;
                             }
                         } else {
+                            // ブロックがある  // 一番高いところがTより上 = 屋根がある
+
+                            // 穴の数がTの形と同じか確認する  // 同じ行の他のところに穴がないか確認  // 穴が多いときはスキップ
                             if ( x_holes[y - 1] > 1 || x_holes[y + 1] > 1 || x_holes[y] > 2
                                 || x_op_holes[y - 1] > 0 || x_op_holes[y + 1] > 0 || x_op_holes[y] > 0)
                             {
                                 continue;
                             }
                         }
+
+                        // Tが縦に3つ並ぶ列の屋根がなく、かつTの背面の壁が高すぎて、屋根がつけられない
+                        // 以下のようなフィールドはスキップする
+                        // [ ] 0001
+                        // [0] 0001
+                        // [1] 0001
+                        // [2] 1101
+                        // [3] 1001    < y = 0
+                        // [4] 1101
                         if ( ( (row_y[0] >> (x + 3)) & ( 1 ) ) == 0 && y - min_y[x + 2] > 3 ) continue;
+
+                        // TSTとして有効な地形なので、スコアを与える  // sはマイナス値なので、+=sすると加点、-=sすると減点なので注意
                         int s = 0;
                         //tp3 * 1
+                        // スコアを加点  // フィールドが危険な状態のときは少し加点を減らす
                         s -= int( warning_factor * ai_param.tspin3 );// + int( warning_factor * ( ai_param.tspin * 4 + ai_param.open_hole ) );
                         score += s;
+
+                        // y=17よりフィールドが高いとき、
+                        // [1] 000
+                        // [2] 110
+                        // [3] 100    < y = 0
+                        // [4] 1101
+                        // [ ] XXXX
+                        // [ ] X0XX   < y+3のxが空白
+                        //      ^------ x
                         if ( y <= pool_h - 3 && ( pool.row[y + 3] & ( 1 << x ) ) == 0 ) {
+                            // y+3のビット列を反転して、空白ブロックを1にする
                             int r = ~pool.row[y + 3] & pool.m_w_mask;
+
                             if ( ( r & ( r - 1 ) ) == 0 ) {
+                                // 空白ブロックが1つだけである
+
+                                // スコアを加点  // TODO TSTからのTSDのような気がするけど、yがずれている気がする // 本当はy+2?
                                 score -= int( warning_factor * (ai_param.tspin * 4 + ai_param.open_hole) );
                             }
                         }
+
                         //int full = 0;
                         {
+                            // TSTの一番下のラインについて、
+                            // Tの隅を埋めて（これまでの条件式で埋まっているはずだけど一応）、ビット列を反転して空白ブロックを1にする
                             int e = ~(pool.row[y + 1] | (1<<x) ) & pool.m_w_mask;
-                            e &= ( e-1); 
+
+                            // ビット列の1を1bit分だけ取り除く
+                            e &= ( e-1);
+
                             if ( e == 0 ) { // 最底只剩一空 (Bottom only has one space)
+                                // TST以外にスペースがない  // 評価を続ける
                                 //++full;
                             } else {
+                                // TSTの一番下のラインがまだ埋まっていない
+                                // これまでの条件式によって、穴ではない = これから埋められるとの判断だと思われる
+
+                                // スコアを打ち消す  // sはマイナス値  // これまでにs分を加点しているので、逆にs分悪くして打ち消している
                                 score -= s;
+
+                                // 終了  // 実質スコア0
                                 continue;
                             }
                         }
+
                         {
+                            // TSTの中央のラインについて、
+                            // Tの裏を埋めて、ビット列を反転して空白ブロックを1にする
                             int e = ~(pool.row[y] | (1<<(x+2))) & pool.m_w_mask;
+
+                            // ビット列の1を1bit分だけ取り除く
                             e &= ( e-1 );
+
+                            // さらにビット列の1を1bit分だけ取り除く
                             if ( (e & ( e-1)) == 0 ) { // 底二只剩两空 (2nd row only has 2 spaces left)
+                                // TST以外にスペースがない  // 評価を続ける
+
                                 //++full;
                             } else {
+                                // TSTの中央のラインがまだ埋まっていない
+                                // これまでの条件式によって、穴ではない = これから埋められるとの判断だと思われる
+
                                 if ( (pool.row[y] & (1<<(x+2))) == 0 ) {
+                                    // Tの裏が空白のとき、さらにスコアを加点する
                                     score -= int( warning_factor * ai_param.tspin3 * 3 );
                                 }
+
+                                // スコアを打ち消す  // sはマイナス値  // これまでにs分を加点しているので、逆にs分悪くして打ち消している
                                 score -= s;
+
+                                // スコアを加点して終了
                                 score -= int( warning_factor * ai_param.tspin3 / 3 );
                                 continue;
                             }
                         }
+
                         {
+                            // TSTの一番上のラインについて、
+                            // ビット列を反転して空白ブロックを1にする
                             int e = ~pool.row[y - 1] & pool.m_w_mask;
+
+                            // ビット列の1を1bit分だけ取り除く
                             e &= ( e-1 );
+
                             if ( e == 0 ) { // 底三只剩一空 (3rd row only has 1 space left)
+                                // TST以外にスペースがない  // 評価を続ける
                                 //++full;
                             } else {
+                                // TSTの一番上のラインがまだ埋まっていない
+                                // これまでの条件式によって、穴ではない = これから埋められるとの判断だと思われる
+
+                                // スコアを打ち消す  // sはマイナス値  // これまでにs分を加点しているので、逆にs分悪くして打ち消している
                                 score -= s;
+
+                                // スコアを加点して終了
                                 score -= int( warning_factor * ai_param.tspin3 );
                                 continue;
                             }
                         }
+
+                        // TSTの形もラインもそろっているので、スコアを加点する  // 屋根はまだ未確認
                         score -= int( warning_factor * ai_param.tspin3 * 3 );
+
                         if ( pool.row[y-3] & ( 1 << (x + 1)) ) {
+                            // 屋根がついている
                             if ( t_dis < 7 ) {
+                                // もうすぐTミノが手に入りそう
+
+                                // スコアを加点
                                 score -= int( warning_factor * ( ai_param.tspin3 * 1 ) + ai_param.hole * 2);
+
+                                // TTが近いほど加点
                                 score -= int( warning_factor * ai_param.tspin3 * 3 / ( t_dis + 1 ) );
                             }
                         }
                     } else if ( ( (row_y[3] >> (x+1) ) & ( 7 ) ) == 4 /*001*/ ) { // 镜像情况 (Mirrored)
+                        // 上の反転版なのでコメントは割愛
+
                         if ( x == 1 ) continue;
                         //if ( t2_x[x-1] == y ) continue; // �ų�T2��
                         // ���пյĵط���ƥ��
@@ -1295,16 +1423,22 @@ namespace AI {
         if ( USE4W )
         if ( ai_param.strategy_4w > 0 && total_clears < 1 ) //&& lastCombo < 1 && pool.combo < 1 )
         {
+            // x=3,4,5,6で一番低い列の高さ
             int maxy_4w = min_y[3];
             maxy_4w = std::max(maxy_4w, min_y[4] );
             maxy_4w = std::max(maxy_4w, min_y[5] );
             maxy_4w = std::max(maxy_4w, min_y[6] );
+
+            // x=0,1,2,7,8,9で一番低い列の高さ  // 中空けREN
             int maxy_4w_combo = min_y[0];
             maxy_4w_combo = std::max(maxy_4w_combo, min_y[1] );
             maxy_4w_combo = std::max(maxy_4w_combo, min_y[2] );
             maxy_4w_combo = std::max(maxy_4w_combo, min_y[pool_w-3] );
             maxy_4w_combo = std::max(maxy_4w_combo, min_y[pool_w-2] );
             maxy_4w_combo = std::max(maxy_4w_combo, min_y[pool_w-1] );
+
+            //x=3よりx=4のほうが高い かつ x=4よりx=5のほうが高い・同じ とき
+            //x=5よりx=6のほうが高い かつ x=5よりx=4のほうが高い・同じ とき
             if ( (min_y[4] < min_y[3] && min_y[4] <= min_y[5])
                 || (min_y[5] < min_y[6] && min_y[5] <= min_y[4]) )
             {
