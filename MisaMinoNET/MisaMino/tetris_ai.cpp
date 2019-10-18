@@ -32,8 +32,21 @@ namespace AI {
         }
     }
 
-    // @param total_clear_att 探索中に送ったライン数
-    // @param total_clears 探索中に消去されたライン数
+    // @param clearScore score2にあたるスコア。ざっくりTスピン攻撃によるスコア（それほど厳密ではない）。最終的には返却されるスコアにも含まれる
+    // @param avg_height 未使用
+    // @param ai_param パラメータ
+    // @param last_pool 未使用
+    // @param pool フィールド情報
+    // @param cur_num 現在のミノ
+    // @param curdepth 未使用
+    // @param total_clear_att。探索中に送ったライン数。 現在のミノによる攻撃力も含む
+    // @param total_clears ms.clear。探索中に消去されたライン数。 現在のミノによって消去されたライン数も含む
+    // @param clear_att 現在のミノによる攻撃力
+    // @param clears 現在のミノによって消去されたライン数
+    // @param wallkick_spin 現在のミノの壁蹴りの状態
+    // @param lastCombo 未使用
+    // @param t_dis 次のTミノまでの個数。Tホールドで0。cur_numはカウントしない
+    // @param upcomeAtt 現在のミノを置く前に送られていた攻撃力。受けることが確定した攻撃力はupcomeAtt < 0。
     int Evaluate( long long &clearScore, double &avg_height, const AI_Param& ai_param, const GameField& last_pool, const GameField& pool, int cur_num,
         int curdepth,
         int total_clear_att, int total_clears, int clear_att, int clears, signed char wallkick_spin,
@@ -200,6 +213,7 @@ namespace AI {
         // y行にあるOpen Holeの数 // 添字は[y]
         int x_op_holes[32] = {0}; // ˮƽ���򶴵�����
         //int last_pool_hole_score;
+        // 穴によって減点されるスコア(あとで利用するため、一時的に分けて記録されている)
         int pool_hole_score;
         // すべての穴の数
         // Open Holeを含む
@@ -295,7 +309,7 @@ namespace AI {
             // 連続している穴をみつけたとき、2つめから+1を始める  // すべてが単体の穴なら0
             // Open Hole は含まない
             int x_renholes[32] = {0}; // ��ֱ������������
-            // Holeによるスコア  // 最終的にscoreへ += される
+            // Holeによるスコア  // 最終的にscoreへ += される  // +ほど悪い
             double hole_score = 0;
 
             const GameField& _pool = pool;
@@ -1419,6 +1433,8 @@ namespace AI {
             }
         }
 
+        // 4列RENに関する戦略
+
         // 4W��״�ж�
         if ( USE4W )
         if ( ai_param.strategy_4w > 0 && total_clears < 1 ) //&& lastCombo < 1 && pool.combo < 1 )
@@ -1437,19 +1453,24 @@ namespace AI {
             maxy_4w_combo = std::max(maxy_4w_combo, min_y[pool_w-2] );
             maxy_4w_combo = std::max(maxy_4w_combo, min_y[pool_w-1] );
 
-            //x=3よりx=4のほうが高い かつ x=4よりx=5のほうが高い・同じ とき
-            //x=5よりx=6のほうが高い かつ x=5よりx=4のほうが高い・同じ とき
-            if ( (min_y[4] < min_y[3] && min_y[4] <= min_y[5])
+            //x=3よりx=4のほうが高い かつ x=5よりx=4のほうが高い・同じ とき
+            //x=6よりx=5のほうが高い かつ x=4よりx=5のほうが高い・同じ とき、コンボしない
+            // 中開けRENの中央部分が左右にわかれている地形はRENがつながりにくく、避けたいと思われる
+            bool b = min_y[4] < min_y[3] && min_y[4] <= min_y[5];
+            if (b
                 || (min_y[5] < min_y[6] && min_y[5] <= min_y[4]) )
             {
                 maxy_4w = -10;
             } else
             for ( int x = 0; x < pool_w; ++x ) {
+                // RENの低い部分より、さらに低い列が存在する
                 if ( min_y[x] > maxy_4w ) {
                     maxy_4w = -10;
                     break;
                 }
             }
+
+            // ループしないので注意
             while ( maxy_4w > 0 ) {
                 //if ( abs( min_y[0] - min_y[1] ) > 4 ) { maxy_4w = -10; break; }
                 //if ( abs( min_y[1] - min_y[2] ) > 4 ) { maxy_4w = -10; break; }
@@ -1457,30 +1478,47 @@ namespace AI {
                 //if ( abs( min_y[pool_w-2] - min_y[pool_w-3] ) > 4 ) { maxy_4w = -10; break; }
                 //if ( abs( min_y[2] - min_y[pool_w-3] ) > 7 ) { maxy_4w = -10; break; }
                 //int avg = (min_y[0] + min_y[1] + min_y[2] + min_y[pool_w-1] + min_y[pool_w-2] + min_y[pool_w-3]) / 6;
+                // 左辺: RENの低い部分の高さ * 2
+                // 右辺: RENの高い部分で一番低いところまでの高さ
                 if ( (pool_h - maxy_4w) * 2 >= maxy_4w - maxy_4w_combo ) {
+                    // あまりRENが続かないので、4wRENはしない
                     maxy_4w = -10;
                     break;
                 }
                 break;
             }
+
+            // RENの低いところが、下から4段以上高いところにあるとき、4wRENはしない
             if ( maxy_4w <= pool_h - 4 ) { // ����г���4�����оͲ���
                 maxy_4w = -10;
             }
+
             //if ( maxy_4w - maxy_4w_combo > 15 ) { // ����г���10Ԥ���оͲ���
             //    maxy_4w = -10;
             //}
+
+            // maxy_4w - maxy_4w_combo: 続きそうなRENの数-1
+            // pool_hole_score: 穴によって減点されたスコア。+ほど悪い
+            // TODO
             if ( maxy_4w - maxy_4w_combo < 9 && pool_hole_score > ai_param.hole * (maxy_4w - maxy_4w_combo) / 2 ) {
                 maxy_4w = -10;
             }
 
+            // RENの低いところがy=8より低い  // 途中で maxy_4w = -10 にされていない
             if ( maxy_4w > 8 ) {
                 bool has_hole = false;
+                // RENの低いところの1段上から、上方向へフィールドを確認する
                 for ( int y = maxy_4w - 1; y >= 0; --y ) {
                     if ( x_holes[y] || x_op_holes[y] ) {
+                        // 穴がある
                         has_hole = true;
                         break;
                     }
                 }
+
+                // RENの低いところに穴がないか確認
+                // y=pool_hはフィールド一番下の段にあたる
+                // 穴がすでにみつかっているときはスキップ
                 if ( ! has_hole && maxy_4w < pool_h ) {
                     if ( x_holes[maxy_4w]>1 || x_op_holes[maxy_4w]>1 ) {
                         has_hole = true;
@@ -1489,19 +1527,33 @@ namespace AI {
 
                 if ( ! has_hole )
                 {
+                    // 穴がないとき
+
+                    // RENの低いところにあるブロック数を取得
                     int sum = maxy_4w - min_y[3];
                     sum += maxy_4w - min_y[4];
                     sum += maxy_4w - min_y[5];
                     sum += maxy_4w - min_y[6];
+
                     int s = 0;
                     if ( sum == 3 || sum == 0 || sum == 4 ) //{ // - (pool_h - maxy_4w) - clears * lastCombo * 2
                     {
+                        // 種なし・種3・種4
+
+                        // 続きそうなREN数 + すでに続いているREN数
                         int hv = (maxy_4w - maxy_4w_combo + 1) * 1 + pool.combo;
+
+                        // スコアを加点
+                        // Tスピンのスコアを足しているのは、ここは4wモードオンのときだけ動く評価なので、TSDよりも優先したい意図がある？
                         s += ai_param.strategy_4w * ( hv ) + (ai_param.hole * 2 + ai_param.tspin * 4);
+
+                        // 種となるブロックがあるときは少しだけ減点?
                         if ( sum > 0 ) {
                             s -= ai_param.strategy_4w / 3;
                         }
                     }
+
+                    // 加点されるときはスコアに反映する
                     if ( s > 0 ) {
                         score -= s;
                     }
@@ -1515,11 +1567,15 @@ namespace AI {
         }
         // �ۻ���
 
+        // TSDのみモードがオン
 		if (TSD_only) {
 			if (cur_num == AI::GEMTYPE_T) {
-				if (wallkick_spin != 0 && clears == 2) clearScore -= 100000000;
+                // Tミノのとき、TSD以外に悪い点を与える
+
+                if (wallkick_spin != 0 && clears == 2) clearScore -= 100000000;
 				else clearScore += 100000000;
 
+                // Tミノ以外のとき、ライン消去したら悪い点を与える
 			} else if (clears != 0) clearScore += 100000000;
 		}
 
@@ -1880,10 +1936,12 @@ namespace AI {
                     ms.max_combo = ms.combo; //ms_last.max_combo + getComboAttack( ms.pool_last.combo );
                     ms.first = *it;
                     ms.first.score2 = 0;
+                    // 初期化されていない  // Evaluate()内でも使われていない
 					double h;
                     ms.first.score = Evaluate(ms.first.score2, h, ai_param, pool, ms.pool_last, cur.num, 0, ms.att, ms.clear, att, clear, wallkick_spin, _pool.combo, t_dis, upcomeAtt);
                     if ( wallkick_spin == 0 && it->wallkick_spin ) ms.first.score += 1;
 
+                    // hが初期化されずに渡っている気がする
 					ms.first.score += score_avoid_softdrop(ai_param.avoid_softdrop, it->softdrop, cur.num, it->wallkick_spin, h);
                     que.push_back();
                 }
@@ -2446,7 +2504,7 @@ namespace AI {
     // @param sd ソフトドロップが必要な操作か
     // @param cur 現在のミノの種類
     // @param wk wallkickであるか（1より大きい値で呼び出しても、暗黙的にbool0,1に変換される）
-    // @param h TODO
+    // @param h おそらく「フィールドの高さ」か「ミノの置く高さ」。値が初期化されていないため、具体的にははっきりしない。
 	int score_avoid_softdrop(int param, bool sd, int cur, bool wk, double h) {
         // ソフトドロップが必要で「Tスピンの壁蹴り」でないときは、param * 5のスコアを与える
         // そのあと、 / (1 + pow(5, h - 6.5)) で標準化

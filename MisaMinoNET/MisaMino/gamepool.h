@@ -32,7 +32,7 @@ namespace AI {
         int m_hold;  // ホールドしているミノの種類
         int m_pc_att;  // パフェしたときの火力
         uint64 hashval;  // 現在のフィールドの状態のハッシュ値
-        unsigned long *row;  // 表示部分を先頭にした配列  // row[0] = m_row[gem_add_y] は表示されないので注意  // もしh=5ならrow[0]は6段目を表す
+        unsigned long *row;  // 表示部分を先頭にした配列  // row[0] = m_row[gem_add_y] は表示されないので注意  // もしh=5ならrow[0]は6段目を表す // つまりrow[h]がフィールドの一番下
 
         GameField () {
             row = &m_row[gem_add_y];
