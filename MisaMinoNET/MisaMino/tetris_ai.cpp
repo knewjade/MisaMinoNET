@@ -537,7 +537,7 @@ namespace AI {
             }
 
             // ■ hole_dis_factor2
-            // 空白の数が多いほどスコアが悪くなる
+            // 空白の数が多いほどスコアが悪くなる  // 穴ではない空白も含む
             // そのまま空白の数を数えると、穴ではない普通の空白がカウントされてしまうため、
             // ざっくり穴のありそうな高さ(miny)を探して、minyより低い位置にある空白を数える
 
@@ -764,8 +764,6 @@ namespace AI {
             // Tスピン・テトリス関係なく、ラインを消したら、すべて等しく減点されるので注意
             // フィールドが危険な状態（地形が高い）のときは、減点される量が緩和される
 
-            // ※ 相手から火力を4段以上受けたときに、相殺しながらライン消去をすると、良いスコアがもらえる
-
             // ■ tspin3
             // ■ tspin
             // ■ tmini
@@ -852,7 +850,7 @@ namespace AI {
 
                     // 良いスコアを与える
                     // `clear_efficient * 自身の火力`
-                    // `clear_useless_factor * 自身の消去ライン` (フィールドが危険な状態だともらえる加点が減る)
+                    // `clear_useless_factor * 自身の消去ライン` (スコアが減点されているので注意)
                     int cur_s = 0;
                     cur_s -= int( ((ai_param.clear_efficient) * ( clear_att ) ) )
                         - int( warning_factor * clears * ai_param.clear_useless_factor);
@@ -1433,7 +1431,9 @@ namespace AI {
             }
         }
 
+        // ■ combo
         // 4列RENに関する戦略
+
 
         // 4W��״�ж�
         if ( USE4W )
@@ -2500,6 +2500,11 @@ namespace AI {
             return m.first;
         }
     }
+
+    // ■ パラメータ：avoid_softdropの意味
+    // Tスピン以外のソフトドロップを避けるようにする
+    // 高さによってTスピンのしやすさを変えたい意図が見える（実際には反映されてなさそう）
+
     // @param param 係数
     // @param sd ソフトドロップが必要な操作か
     // @param cur 現在のミノの種類
@@ -2508,6 +2513,7 @@ namespace AI {
 	int score_avoid_softdrop(int param, bool sd, int cur, bool wk, double h) {
         // ソフトドロップが必要で「Tスピンの壁蹴り」でないときは、param * 5のスコアを与える
         // そのあと、 / (1 + pow(5, h - 6.5)) で標準化
+        // hが大きいほどスコアは大きくなる  // +=しているので減点
 		return TSD_only? 0 : (int) ((double)((sd && !(cur == AI::GEMTYPE_T && wk))? param * 5 : 0) / (1 + pow(5, h - 6.5)));
 	}
     struct AI_THREAD_PARAM {

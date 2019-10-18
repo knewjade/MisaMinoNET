@@ -254,6 +254,9 @@ namespace AI {
         int dif_factor; //ƫ��ֵ
 
 		int b2b;
+		// 探索中にコンボによるスコアが計算されている  // Evaluate()とは別で行われているので注意
+		// 結果的に (combo+1)^combo みたいな数式の累積を計算していることになっていそう （数式自体は正確ではありません）
+        //  ms.combo = ms_last.combo + (combo_step_max + 1 - clear) * ai_param.combo / 30;
 		int combo;
 		int avoid_softdrop;
 		int tmini;
