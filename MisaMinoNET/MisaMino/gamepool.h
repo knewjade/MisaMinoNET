@@ -127,40 +127,42 @@ namespace AI {
         // @param gem 回転後のミノ
         // @param spinclockwise 左回転0 or 右回転1で指定
         bool wallkickTest(int& x, int& y, const Gem & gem, int spinclockwise) const {
+            // Iミノ用回転後の移動先
             static int Iwallkickdata[4][2][4][2] = {
                 { // O
-                    { // R
+                    { // R  // 出現方向 -> 右回転状態
                         { 2, 0},{-1, 0},{ 2,-1},{-1, 2},
                     },
-                    { // L
+                    { // L  // 出現方向 -> 左回転状態
                         { 1, 0},{-2, 0},{ 1, 2},{-2,-1},
                     },
                 },
                 { // L
-                    { // O
+                    { // O  // 左回転状態 -> 出現方向
                         {-1, 0},{ 2, 0},{-1,-2},{ 2, 1},
                     },
-                    { // 2
+                    { // 2  // 左回転状態 -> 裏返し方向
                         { 2, 0},{-1, 0},{ 2,-1},{-1, 2},
                     },
                 },
                 { // 2
-                    { // L
+                    { // L  // 裏返し方向 -> 左回転状態
                         {-2, 0},{ 1, 0},{-2, 1},{ 1,-2},
                     },
-                    { // R
+                    { // R  // 裏返し方向 -> 右回転状態
                         {-1, 0},{ 2, 0},{-1,-2},{ 2, 1},
                     },
                 },
                 { // R
-                    { // 2
+                    { // 2  // 右回転状態 -> 裏返し方向
                         { 1, 0},{-2, 0},{ 1, 2},{-2,-1},
                     },
-                    { // O
+                    { // O  // 右回転状態 -> 出現方向
                         {-2, 0},{ 1, 0},{-2, 1},{ 1,-2},
                     },
                 },
             };
+            // Iミノ以外用回転後の移動先
             static int wallkickdata[4][2][4][2] = {
                 { // O
                     { // R
@@ -272,6 +274,9 @@ namespace AI {
             }
             return wallkick_spin;
         }
+        // 揃っているラインを消去する
+        // フィールドとclearnum・b2b・comboを更新する
+        // @param _wallkick_spin 最後のwallkickの状態
         int clearLines( signed char _wallkick_spin ) {
             int clearnum = 0;
             int h2 = m_h;

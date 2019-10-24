@@ -226,7 +226,8 @@ namespace AI {
         }
     };
     struct AI_Param {
-        // TODO 最大高さ
+        // cpp側のEvaluate()を参照
+
         int miny_factor; // ��߸߶ȷ�
         // マイナス: 穴ポイント
         int hole; // -����
@@ -234,7 +235,6 @@ namespace AI {
         int open_hole; // -���Ŷ������ܲ��
         // マイナス: 水平方向のブロック<->空白の変化に対する係数
         int v_transitions; // -ˮƽת��ϵ��
-        // TODO T3基本ポイント
         int tspin3; // T3������
 
         int clear_efficient; // ����Ч��ϵ��
