@@ -445,7 +445,7 @@ namespace AI {
         int m_cur_x, m_cur_y;  // 操作中のミノの位置
         int m_curnum;  // これまでに使用したミノの個数。操作中のミノを含む
         signed char wallkick_spin;  // 現在の壁蹴りの状態。回転すると1or2になり、移動をするとリセットされる
-        AI::Gem m_next[128];  // ネクストのミノ
+        AI::Gem m_next[1024];  // ネクストのミノ
         int m_next_num;  // ネクストに保存されているミノの個数
         point m_base, m_size;  // TetrisGameで初期化されている。しかし、どこからも参照されていないため、用途は不明
         int m_clearLines;  // 最後の操作で消去されたライン数
